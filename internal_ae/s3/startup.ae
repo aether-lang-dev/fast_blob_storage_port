@@ -1,0 +1,109 @@
+// internal.s3.startup — startup reconciliation (port of
+// internal/storage/reconcile.go). Has access to both the db and the
+// data dir, so it lives here rather than in the storage leaf (which
+// must not depend on metadata). Two passes:
+//   1. purge data_dir/.tmp except the multipart/ subtree
+//   2. for each bucket dir, remove object files whose storage_path is
+//      not present in the objects table (orphans from crashed writes)
+
+import std.string
+import std.fs
+import contrib.sqlite
+import objects
+import pathutil
+
+exports (reconcile)
+
+extern dir_exists(path: string) -> int
+extern fs_path_exists(path: string) -> int
+extern file_delete_raw(path: string) -> int
+extern dir_list_count(list: ptr) -> int
+extern dir_list_get(list: ptr, index: int) -> string
+extern dir_list_free(list: ptr)
+
+// Build the set of known storage_paths for a bucket as a '\n'-joined
+// string we can membership-test with substring matching against a
+// delimited form. (Small N per bucket; simple is fine.)
+_known_paths(db: ptr, bucket: string) -> string {
+    stmt, perr = sqlite.prepare(db, "SELECT storage_path FROM objects WHERE bucket_name = ?1")
+    if perr != "" { return "" }
+    sqlite.bind_text(stmt, 1, bucket)
+    out = "\n"
+    while sqlite.next_row(stmt, db) == 1 {
+        p = string.copy(sqlite.column_text(stmt, 0))
+        out = string.concat(out, string.concat(p, "\n"))
+    }
+    sqlite.finalize(stmt)
+    return out
+}
+
+// Reconcile the data dir against the metadata. Returns "" on success or
+// the first error.
+reconcile(db: ptr, data_dir: string) -> string {
+    // 1. purge .tmp (except multipart)
+    tmp = pathutil.join(data_dir, ".tmp")
+    if dir_exists(tmp) == 1 {
+        _purge_tmp(tmp)
+    }
+
+    // 2. per-bucket orphan sweep
+    list, lerr = fs.list_dir(data_dir)
+    if lerr != "" { return "" }
+    cnt = dir_list_count(list)
+    i = 0
+    while i < cnt {
+        name = dir_list_get(list, i)
+        full = pathutil.join(data_dir, name)
+        is_tmp = string.equals(name, ".tmp")
+        if dir_exists(full) == 1 && is_tmp == 0 {
+            _sweep_bucket(db, data_dir, name)
+        }
+        i = i + 1
+    }
+    dir_list_free(list)
+    return ""
+}
+
+// Remove orphaned object files in one bucket dir (non-recursive: object
+// files sit directly under the bucket dir with UUID names).
+_sweep_bucket(db: ptr, data_dir: string, bucket: string) {
+    known = _known_paths(db, bucket)
+    bdir = pathutil.join(data_dir, bucket)
+    list, lerr = fs.list_dir(bdir)
+    if lerr != "" { return }
+    cnt = dir_list_count(list)
+    i = 0
+    while i < cnt {
+        fname = dir_list_get(list, i)
+        sp = pathutil.join(bucket, fname)
+        needle = string.concat("\n", string.concat(sp, "\n"))
+        if string.contains(known, needle) == 0 {
+            full = pathutil.join(bdir, fname)
+            if dir_exists(full) == 0 {
+                file_delete_raw(full)
+            }
+        }
+        i = i + 1
+    }
+    dir_list_free(list)
+}
+
+// Delete loose temp files under .tmp, preserving the multipart/ subtree.
+_purge_tmp(tmp: string) {
+    list, lerr = fs.list_dir(tmp)
+    if lerr != "" { return }
+    cnt = dir_list_count(list)
+    i = 0
+    while i < cnt {
+        name = dir_list_get(list, i)
+        full = pathutil.join(tmp, name)
+        is_mp = string.equals(name, "multipart")
+        if is_mp == 0 {
+            if dir_exists(full) == 0 {
+                file_delete_raw(full)
+            }
+        }
+        i = i + 1
+    }
+    dir_list_free(list)
+}

@@ -1,0 +1,69 @@
+import aeocha
+import schema
+import objects
+import storage
+import startup
+import contrib.sqlite
+import std.string
+import std.fs
+import uuid
+
+extern fs_path_exists(path: string) -> int
+
+main() {
+    fw = aeocha.init()
+
+    db, oerr = schema.open_db(":memory:")
+    sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role) VALUES ('u','U','ak','sh','admin')")
+    sqlite.exec(db, "INSERT INTO buckets (name, owner_id) VALUES ('b','u')")
+
+    data_dir = string.concat("/tmp/fbs_recon_", uuid.new_hex(6))
+    fs.mkdir_p(data_dir)
+
+    // a real, tracked object
+    sp, size, werr = storage.write(data_dir, "b", "keep.txt", "keep this", 9)
+    objects.object_upsert(db, "o1", "b", "keep.txt", size, "etag", "", sp, "", "")
+    real_full = string.concat(data_dir, string.concat("/", sp))
+
+    // an orphan file in the bucket dir (not in metadata)
+    bdir = string.concat(data_dir, "/b")
+    fs.mkdir_p(bdir)
+    orphan = string.concat(bdir, "/orphan-uuid-xyz")
+    fs.write_atomic(orphan, "junk", 4)
+
+    // a loose temp file
+    tmp = string.concat(data_dir, "/.tmp")
+    fs.mkdir_p(tmp)
+    looseTmp = string.concat(tmp, "/stale.tmp")
+    fs.write_atomic(looseTmp, "stale", 5)
+
+    // sanity: all three exist
+    pre_real = fs_path_exists(real_full)
+    pre_orphan = fs_path_exists(orphan)
+    pre_tmp = fs_path_exists(looseTmp)
+
+    startup.reconcile(db, data_dir)
+
+    post_real = fs_path_exists(real_full)
+    post_orphan = fs_path_exists(orphan)
+    post_tmp = fs_path_exists(looseTmp)
+
+    aeocha.describe(fw, "startup.reconcile") {
+        aeocha.it("sets up all three files") callback {
+            aeocha.assert_eq(fw, pre_real, 1, "real present")
+            aeocha.assert_eq(fw, pre_orphan, 1, "orphan present")
+            aeocha.assert_eq(fw, pre_tmp, 1, "tmp present")
+        }
+        aeocha.it("keeps tracked object") callback {
+            aeocha.assert_eq(fw, post_real, 1, "real kept")
+        }
+        aeocha.it("removes orphan object file") callback {
+            aeocha.assert_eq(fw, post_orphan, 0, "orphan removed")
+        }
+        aeocha.it("purges loose temp file") callback {
+            aeocha.assert_eq(fw, post_tmp, 0, "tmp purged")
+        }
+    }
+
+    aeocha.run_summary(fw)
+}

@@ -11,6 +11,7 @@ import std.fs
 import schema
 import s3server
 import mgmt
+import startup
 
 extern http_server_start_raw(server: ptr) -> int
 
@@ -44,6 +45,12 @@ main() {
     if derr != "" {
         println("fatal: data dir: ${derr}")
         return
+    }
+
+    // Startup reconciliation: purge stale temp files + orphaned objects.
+    rerr = startup.reconcile(db, data_dir)
+    if rerr != "" {
+        println("warning: reconcile: ${rerr}")
     }
 
     s = http.server_create(port)
