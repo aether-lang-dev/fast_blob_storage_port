@@ -1,0 +1,121 @@
+// internal.s3.mgmt — setup (bootstrap) + management JSON API handlers
+// (port of internal/setup + internal/management). Registered alongside
+// the S3 routes on the same server. JSON responses are hand-built.
+//
+// Loopback note: the Go setup endpoints are loopback-only via RemoteAddr.
+// Aether's http server exposes no peer IP, and the server binds
+// 127.0.0.1 by default, so we treat setup as host-local (matching the
+// documented "call from the server host" bootstrap flow).
+
+import std.http
+import std.string
+import contrib.sqlite
+import schema
+import users
+import buckets
+import objects
+import management
+import auth
+import tokens
+import region
+import uuid
+
+exports (register_mgmt_routes)
+
+extern appstate_get_db() -> ptr
+
+_json(res: ptr, status: int, body: string) {
+    http.response_set_status(res, status)
+    http.response_set_header(res, "Content-Type", "application/json")
+    http.response_set_body(res, body)
+}
+
+// Authenticate + require admin. Returns (user_id, "") or ("", err).
+_require_admin(req: ptr) -> {
+    hdr = http.get_header(req, "Authorization")
+    if hdr == null { return "", "unauthorized" }
+    prefix = "Bearer "
+    if string.starts_with(hdr, prefix) == 0 { return "", "unauthorized" }
+    token = string.substring(hdr, string.length(prefix), string.length(hdr))
+    ak, sec, berr = auth.split_bearer(token)
+    if berr != "" { return "", "unauthorized" }
+    db = appstate_get_db()
+    hash, herr = users.user_get_secret_hash(db, ak)
+    if herr != "" { return "", "unauthorized" }
+    if auth.verify_secret(sec, hash) != 1 { return "", "unauthorized" }
+    uid, role, active, gerr = users.user_get_by_access_key(db, ak)
+    if gerr != "" { return "", "unauthorized" }
+    if string.equals(role, "admin") == 0 { return "", "forbidden" }
+    return uid, ""
+}
+
+// GET /api/setup/status
+handle_setup_status(req: ptr, res: ptr, ud: ptr) {
+    db = appstate_get_db()
+    n = users.user_count(db)
+    required = "false"
+    if n == 0 { required = "true" }
+    body = string.concat("{\"bootstrap_required\":", required)
+    body = string.concat(body, ",\"region\":\"")
+    body = string.concat(body, region.REGION)
+    body = string.concat(body, "\"}")
+    _json(res, 200, body)
+}
+
+// POST /api/setup/bootstrap — create first admin, return creds JSON once.
+handle_bootstrap(req: ptr, res: ptr, ud: ptr) {
+    db = appstate_get_db()
+    if users.user_count(db) > 0 {
+        _json(res, 409, "{\"error\":\"users already exist\"}")
+        return
+    }
+    ak, raw, hash = tokens.issue_bearer()
+    sak, ssecret = tokens.issue_sigv4()
+    uid = uuid.new_uuid()
+    cerr = users.user_insert(db, uid, "Initial Admin", ak, hash, sak, ssecret, "admin", 1, "", "")
+    if cerr != "" {
+        _json(res, 500, "{\"error\":\"failed to create admin\"}")
+        return
+    }
+    body = "{\"bearer_token\":\""
+    body = string.concat(body, raw)
+    body = string.concat(body, "\",\"sigv4_access_key_id\":\"")
+    body = string.concat(body, sak)
+    body = string.concat(body, "\",\"sigv4_secret_key\":\"")
+    body = string.concat(body, ssecret)
+    body = string.concat(body, "\",\"region\":\"")
+    body = string.concat(body, region.REGION)
+    body = string.concat(body, "\"}")
+    _json(res, 201, body)
+}
+
+// GET /api/management/metrics
+handle_metrics(req: ptr, res: ptr, ud: ptr) {
+    uid, aerr = _require_admin(req)
+    if aerr != "" {
+        st = 401
+        if string.equals(aerr, "forbidden") == 1 { st = 403 }
+        _json(res, st, "{\"error\":\"unauthorized\"}")
+        return
+    }
+    db = appstate_get_db()
+    bc, oc, ob, uc, auc = management.metrics(db)
+    body = "{\"bucket_count\":"
+    body = string.concat(body, string.from_int(bc))
+    body = string.concat(body, ",\"object_count\":")
+    body = string.concat(body, string.from_int(oc))
+    body = string.concat(body, ",\"total_object_bytes\":")
+    body = string.concat(body, string.from_int(ob))
+    body = string.concat(body, ",\"user_count\":")
+    body = string.concat(body, string.from_int(uc))
+    body = string.concat(body, ",\"active_user_count\":")
+    body = string.concat(body, string.from_int(auc))
+    body = string.concat(body, "}")
+    _json(res, 200, body)
+}
+
+register_mgmt_routes(server: ptr) {
+    http.server_get(server, "/api/setup/status", handle_setup_status, 0)
+    http.server_post(server, "/api/setup/bootstrap", handle_bootstrap, 0)
+    http.server_get(server, "/api/management/metrics", handle_metrics, 0)
+}

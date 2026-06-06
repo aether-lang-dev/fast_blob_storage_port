@@ -1,0 +1,31 @@
+// internal.auth.tokens — credential issuance (port of token.go).
+// Bearer: access_key_id = "fbsa_" + hex; raw token = "<ak>.<secret>";
+// stored secret_hash = sha256(secret). SigV4: access_key_id = "fbsv4_" +
+// hex, secret_key = hex. Secrets are returned once to the caller.
+
+import std.string
+import auth
+import uuid
+
+exports (issue_bearer, issue_sigv4)
+
+const BEARER_PREFIX = "fbsa_"
+const SIGV4_PREFIX  = "fbsv4_"
+
+// Returns (access_key_id, raw_token, secret_hash). raw_token is shown to
+// the operator once; secret_hash is what to store.
+issue_bearer() -> {
+    ak = string.concat(BEARER_PREFIX, uuid.new_hex(12))
+    secret = uuid.new_hex(24)
+    raw = string.concat(ak, string.concat(".", secret))
+    hash = auth.hash_secret(secret)
+    return ak, raw, hash
+}
+
+// Returns (sigv4_access_key_id, sigv4_secret_key) — both stored, both
+// returned to the operator once.
+issue_sigv4() -> {
+    ak = string.concat(SIGV4_PREFIX, uuid.new_hex(12))
+    secret = uuid.new_hex(24)
+    return ak, secret
+}

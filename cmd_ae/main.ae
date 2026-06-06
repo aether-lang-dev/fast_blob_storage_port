@@ -1,0 +1,58 @@
+// cmd_ae/main — fbs-core server entry point (Aether). Opens the SQLite
+// metadata store, applies the schema, ensures the data dir, wires the S3
+// + management/setup routes, and serves. Config via env with defaults
+// matching internal/config: FBS_HTTP_ADDR (host:port), FBS_DB_PATH,
+// FBS_DATA_DIR.
+
+import std.http
+import std.string
+import std.os
+import std.fs
+import schema
+import s3server
+import mgmt
+
+extern http_server_start_raw(server: ptr) -> int
+
+const DEFAULT_PORT = 9000
+const DEFAULT_HOST = "127.0.0.1"
+const DEFAULT_DB   = "./fbs.db"
+const DEFAULT_DATA = "./data"
+
+_env_or(name: string, fallback: string) -> string {
+    v = os.getenv(name)
+    if v == null { return fallback }
+    if string.length(v) == 0 { return fallback }
+    return v
+}
+
+main() {
+    db_path = _env_or("FBS_DB_PATH", DEFAULT_DB)
+    data_dir = _env_or("FBS_DATA_DIR", DEFAULT_DATA)
+    host = _env_or("FBS_HTTP_HOST", DEFAULT_HOST)
+    port_str = _env_or("FBS_HTTP_PORT", "9000")
+    port, perr = string.to_int(port_str)
+    if perr != "" { port = DEFAULT_PORT }
+
+    db, oerr = schema.open_db(db_path)
+    if oerr != "" {
+        println("fatal: open db: ${oerr}")
+        return
+    }
+
+    derr = fs.mkdir_p(data_dir)
+    if derr != "" {
+        println("fatal: data dir: ${derr}")
+        return
+    }
+
+    s = http.server_create(port)
+    http.server_set_host(s, host)
+    s3server.set_state(db, data_dir)
+    s3server.register_routes(s)
+    mgmt.register_mgmt_routes(s)
+
+    println("fbs-core (Aether) listening on ${host}:${port}")
+    println("data dir: ${data_dir}  db: ${db_path}")
+    http_server_start_raw(s)
+}

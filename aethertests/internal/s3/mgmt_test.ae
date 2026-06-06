@@ -1,0 +1,129 @@
+// Integration test for setup (bootstrap) + management JSON API.
+// Boots an empty store, calls /api/setup/bootstrap, extracts the bearer
+// token from the JSON, then uses it to create a bucket and read metrics.
+
+import aeocha
+import std.http
+import std.http.client
+import schema
+import s3server
+import mgmt
+import contrib.sqlite
+import std.string
+import uuid
+
+extern http_server_start_background_raw(server: ptr) -> int
+extern http_server_port(server: ptr) -> int
+extern sleep(ms: int)
+
+_between(s: string, open: string, close: string) -> string {
+    i = string.index_of(s, open)
+    if i < 0 { return "" }
+    start = i + string.length(open)
+    rest = string.substring(s, start, string.length(s))
+    j = string.index_of(rest, close)
+    if j < 0 { return "" }
+    return string.substring(rest, 0, j)
+}
+
+main() {
+    fw = aeocha.init()
+
+    db, oerr = schema.open_db(":memory:")
+    data_dir = string.concat("/tmp/fbs_mgmt_", uuid.new_hex(6))
+
+    s = http.server_create(0)
+    http.server_set_host(s, "127.0.0.1")
+    s3server.set_state(db, data_dir)
+    s3server.register_routes(s)
+    mgmt.register_mgmt_routes(s)
+    http_server_start_background_raw(s)
+    sleep(250)
+    port = http_server_port(s)
+    base = "http://127.0.0.1:"
+
+    // 1. status before bootstrap -> bootstrap_required true
+    rs = client.request("GET", "${base}${port}/api/setup/status")
+    client.set_timeout(rs, 5s)
+    resp_s, e1 = client.send_request(rs)
+    client.request_free(rs)
+    status_body = string.copy(client.response_body(resp_s))
+    req_true = string.contains(status_body, "\"bootstrap_required\":true")
+    client.response_free(resp_s)
+
+    // 2. bootstrap
+    rb = client.request("POST", "${base}${port}/api/setup/bootstrap")
+    client.set_timeout(rb, 5s)
+    client.set_body(rb, "{}", 2, "application/json")
+    resp_b, e2 = client.send_request(rb)
+    client.request_free(rb)
+    st_boot = client.response_status(resp_b)
+    boot_body = string.copy(client.response_body(resp_b))
+    client.response_free(resp_b)
+    token = _between(boot_body, "\"bearer_token\":\"", "\"")
+
+    // 3. second bootstrap -> 409
+    rb2 = client.request("POST", "${base}${port}/api/setup/bootstrap")
+    client.set_timeout(rb2, 5s)
+    client.set_body(rb2, "{}", 2, "application/json")
+    resp_b2, e3 = client.send_request(rb2)
+    client.request_free(rb2)
+    st_boot2 = client.response_status(resp_b2)
+    client.response_free(resp_b2)
+
+    // 4. use the token: create a bucket
+    bearer = string.concat("Bearer ", token)
+    rc = client.request("PUT", "${base}${port}/adminbucket")
+    client.set_timeout(rc, 5s)
+    client.set_header(rc, "Authorization", bearer)
+    resp_c, e4 = client.send_request(rc)
+    client.request_free(rc)
+    st_bucket = client.response_status(resp_c)
+    client.response_free(resp_c)
+
+    // 5. metrics with token
+    rmx = client.request("GET", "${base}${port}/api/management/metrics")
+    client.set_timeout(rmx, 5s)
+    client.set_header(rmx, "Authorization", bearer)
+    resp_m, e5 = client.send_request(rmx)
+    client.request_free(rmx)
+    st_metrics = client.response_status(resp_m)
+    metrics_body = string.copy(client.response_body(resp_m))
+    has_bucket1 = string.contains(metrics_body, "\"bucket_count\":1")
+    client.response_free(resp_m)
+
+    // 6. metrics without token -> 401
+    rmn = client.request("GET", "${base}${port}/api/management/metrics")
+    client.set_timeout(rmn, 5s)
+    resp_mn, e6 = client.send_request(rmn)
+    client.request_free(rmn)
+    st_noauth = client.response_status(resp_mn)
+    client.response_free(resp_mn)
+
+    http.server_stop(s)
+
+    aeocha.describe(fw, "setup + management") {
+        aeocha.it("status reports bootstrap required") callback {
+            aeocha.assert_eq(fw, req_true, 1, "required true")
+        }
+        aeocha.it("bootstrap creates admin + returns token") callback {
+            aeocha.assert_eq(fw, st_boot, 201, "201 created")
+            aeocha.assert_gt(fw, string.length(token), 10, "token present")
+        }
+        aeocha.it("second bootstrap rejected") callback {
+            aeocha.assert_eq(fw, st_boot2, 409, "409 conflict")
+        }
+        aeocha.it("issued token authorizes bucket create") callback {
+            aeocha.assert_eq(fw, st_bucket, 200, "200 bucket")
+        }
+        aeocha.it("metrics with token") callback {
+            aeocha.assert_eq(fw, st_metrics, 200, "200 metrics")
+            aeocha.assert_eq(fw, has_bucket1, 1, "bucket_count 1")
+        }
+        aeocha.it("metrics without token 401") callback {
+            aeocha.assert_eq(fw, st_noauth, 401, "401 no auth")
+        }
+    }
+
+    aeocha.run_summary(fw)
+}
