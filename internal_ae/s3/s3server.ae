@@ -19,6 +19,8 @@ import auth
 import s3xml
 import region
 import uuid
+import multipart
+import std.collections (*)
 
 exports (register_routes, set_state)
 
@@ -67,6 +69,40 @@ _authenticate(req: ptr) -> {
     if gerr != "" { return "", "", "invalid" }
     if active == 0 { return "", "", "inactive" }
     return uid, role, ""
+}
+
+// Read a single query parameter by parsing request_query() ourselves.
+// std.http.get_query_param is broken for multi-param queries (aether
+// #625 — returns the last param's value for every key). Returns "" if
+// absent.
+_query_param(req: ptr, name: string) -> string {
+    q = http.request_query(req)
+    if string.length(q) == 0 { return "" }
+    pairs = string.split(q, "&")
+    n = string.array_size(pairs)
+    target = string.concat(name, "=")
+    out = ""
+    found = 0
+    i = 0
+    while i < n {
+        kv = string.array_get(pairs, i)
+        if found == 0 {
+            if string.starts_with(kv, target) == 1 {
+                out = string.copy(string.substring(kv, string.length(target), string.length(kv)))
+                found = 1
+            }
+        }
+        i = i + 1
+    }
+    string.array_free(pairs)
+    return out
+}
+
+// 1 if the query contains the given key/flag (e.g. ?uploads, ?location).
+_query_has(req: ptr, name: string) -> int {
+    q = http.request_query(req)
+    if string.contains(q, name) == 1 { return 1 }
+    return 0
 }
 
 // Extract the object key from a path like /bucket/a/b/c -> "a/b/c".
@@ -176,8 +212,20 @@ handle_delete_bucket(req: ptr, res: ptr, ud: ptr) {
     http.response_set_body(res, "")
 }
 
-// PUT /:bucket/* — PutObject.
+// PUT /:bucket/* dispatcher — UploadPart if ?uploadId&partNumber, else PutObject.
 handle_put_object(req: ptr, res: ptr, ud: ptr) {
+    upload_id = _query_param(req, "uploadId")
+    if upload_id != null {
+        if string.length(upload_id) > 0 {
+            _upload_part_impl(req, res)
+            return
+        }
+    }
+    _put_object_impl(req, res)
+}
+
+// PUT /:bucket/* — PutObject.
+_put_object_impl(req: ptr, res: ptr) {
     uid, role, aerr = _authenticate(req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
@@ -274,8 +322,20 @@ handle_head_object(req: ptr, res: ptr, ud: ptr) {
     http.response_set_body(res, "")
 }
 
-// DELETE /:bucket/* — DeleteObject.
+// DELETE /:bucket/* dispatcher — AbortMultipartUpload if ?uploadId, else DeleteObject.
 handle_delete_object(req: ptr, res: ptr, ud: ptr) {
+    upload_id = _query_param(req, "uploadId")
+    if upload_id != null {
+        if string.length(upload_id) > 0 {
+            _abort_mpu_impl(req, res, upload_id)
+            return
+        }
+    }
+    _delete_object_impl(req, res)
+}
+
+// DELETE /:bucket/* — DeleteObject.
+_delete_object_impl(req: ptr, res: ptr) {
     uid, role, aerr = _authenticate(req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
@@ -296,6 +356,166 @@ handle_delete_object(req: ptr, res: ptr, ud: ptr) {
     http.response_set_body(res, "")
 }
 
+// ---- multipart handlers ----
+
+// POST /:bucket/* dispatcher — CreateMultipartUpload if ?uploads,
+// CompleteMultipartUpload if ?uploadId.
+handle_post_object(req: ptr, res: ptr, ud: ptr) {
+    if _query_has(req, "uploads") == 1 {
+        _create_mpu_impl(req, res)
+        return
+    }
+    upload_id = _query_param(req, "uploadId")
+    if upload_id != null {
+        if string.length(upload_id) > 0 {
+            _complete_mpu_impl(req, res, upload_id)
+            return
+        }
+    }
+    _send_error(res, 501, "NotImplemented", "Not implemented.", http.request_path(req))
+}
+
+_create_mpu_impl(req: ptr, res: ptr) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" {
+        _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
+        return
+    }
+    bucket = http.get_path_param(req, "bucket")
+    path = http.request_path(req)
+    key = _object_key(path, bucket)
+    db = appstate_get_db()
+    if buckets.bucket_exists(db, bucket) == 0 {
+        _send_error(res, 404, "NoSuchBucket", "The specified bucket does not exist.", path)
+        return
+    }
+    upid = uuid.new_uuid()
+    ct = http.get_header(req, "Content-Type")
+    if ct == null { ct = "" }
+    cerr = multipart.mpu_create(db, upid, bucket, key, ct)
+    if cerr != "" {
+        _send_error(res, 500, "InternalError", "Internal error.", path)
+        return
+    }
+    http.response_set_status(res, 200)
+    http.response_set_header(res, "Content-Type", "application/xml")
+    http.response_set_body(res, s3xml.initiate_mpu_xml(bucket, key, upid))
+}
+
+_upload_part_impl(req: ptr, res: ptr) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" {
+        _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
+        return
+    }
+    path = http.request_path(req)
+    db = appstate_get_db()
+    data_dir = appstate_get_data_dir()
+    upload_id = _query_param(req, "uploadId")
+    pn_str = _query_param(req, "partNumber")
+    if pn_str == null { pn_str = "0" }
+    pn, pnerr = string.to_int(pn_str)
+    if pnerr != "" || pn <= 0 {
+        _send_error(res, 400, "InvalidRequest", "Invalid partNumber.", path)
+        return
+    }
+    body = http.request_body(req)
+    blen = http.request_body_length(req)
+    sp, size, werr = storage.write_part(data_dir, upload_id, pn, body, blen)
+    if werr != "" {
+        _send_error(res, 400, "InvalidRequest", werr, path)
+        return
+    }
+    etag = _etag(body, blen)
+    old, aerr2 = multipart.mpu_add_part(db, upload_id, pn, size, etag, sp)
+    if aerr2 != "" {
+        _send_error(res, 404, "NoSuchUpload", "The specified multipart upload does not exist.", path)
+        return
+    }
+    // remove the superseded part file if any
+    if string.length(old) > 0 {
+        storage.delete_object(data_dir, old)
+    }
+    qetag = string.concat("\"", string.concat(etag, "\""))
+    http.response_set_status(res, 200)
+    http.response_set_header(res, "ETag", qetag)
+    http.response_set_body(res, "")
+}
+
+_complete_mpu_impl(req: ptr, res: ptr, upload_id: string) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" {
+        _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
+        return
+    }
+    bucket = http.get_path_param(req, "bucket")
+    path = http.request_path(req)
+    key = _object_key(path, bucket)
+    db = appstate_get_db()
+    data_dir = appstate_get_data_dir()
+
+    bk, mkey, ct, status, gerr = multipart.mpu_get_status(db, upload_id)
+    if gerr != "" {
+        _send_error(res, 404, "NoSuchUpload", "The specified multipart upload does not exist.", path)
+        return
+    }
+    // claim active -> completing
+    clerr = multipart.mpu_claim(db, upload_id, "completing")
+    if clerr != "" {
+        _send_error(res, 404, "NoSuchUpload", "The specified multipart upload does not exist.", path)
+        return
+    }
+    // assemble parts in order
+    paths_joined = multipart.mpu_part_storage_paths(db, upload_id)
+    if string.length(paths_joined) == 0 {
+        _send_error(res, 400, "InvalidPart", "No parts.", path)
+        return
+    }
+    plist = string_list_new()
+    parts = string.split(paths_joined, "\n")
+    np = string.array_size(parts)
+    i = 0
+    while i < np {
+        string_list_add(plist, string.copy(string.array_get(parts, i)))
+        i = i + 1
+    }
+    string.array_free(parts)
+
+    sp, total, asmerr = storage.assemble_parts(data_dir, bucket, key, plist, np)
+    if asmerr != "" {
+        multipart.mpu_set_status(db, upload_id, "active")
+        _send_error(res, 500, "InternalError", asmerr, path)
+        return
+    }
+    // ETag = md5 of assembled object (simplified; Go uses md5-of-md5s).
+    data, dlen, rerr = storage.read(data_dir, sp)
+    etag = _etag(data, dlen)
+    oid = uuid.new_uuid()
+    objects.object_upsert(db, oid, bucket, key, total, etag, ct, sp, "", "")
+    // cleanup parts + upload record
+    multipart.mpu_delete(db, upload_id)
+
+    loc = string.concat("/", string.concat(bucket, string.concat("/", key)))
+    http.response_set_status(res, 200)
+    http.response_set_header(res, "Content-Type", "application/xml")
+    http.response_set_body(res, s3xml.complete_mpu_xml(loc, bucket, key, etag))
+}
+
+_abort_mpu_impl(req: ptr, res: ptr, upload_id: string) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" {
+        _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
+        return
+    }
+    db = appstate_get_db()
+    data_dir = appstate_get_data_dir()
+    // delete part files
+    storage.delete_upload_parts(data_dir, upload_id)
+    multipart.mpu_delete(db, upload_id)
+    http.response_set_status(res, 204)
+    http.response_set_body(res, "")
+}
+
 // GET /:bucket with ?list-type=2 (we register it on the bucket GET; the
 // dispatcher checks the query) — ListObjectsV2.
 handle_list_objects(req: ptr, res: ptr, ud: ptr) {
@@ -310,7 +530,7 @@ handle_list_objects(req: ptr, res: ptr, ud: ptr) {
         _send_error(res, 404, "NoSuchBucket", "The specified bucket does not exist.", http.request_path(req))
         return
     }
-    prefix = http.get_query_param(req, "prefix")
+    prefix = _query_param(req, "prefix")
     if prefix == null { prefix = "" }
     max_keys = 1000
     keys, trunc = objects.object_list_keys(db, bucket, prefix, "", max_keys)
@@ -341,18 +561,11 @@ handle_list_objects(req: ptr, res: ptr, ud: ptr) {
 // Dispatcher for GET /:bucket — list-type=2 -> list objects, ?location ->
 // location, else also list (v1-ish). Simplified: always list objects.
 handle_bucket_get(req: ptr, res: ptr, ud: ptr) {
-    loc = http.get_query_param(req, "location")
-    if loc != null {
-        if string.length(loc) >= 0 {
-            // ?location present (value may be "")
-            q = http.request_query(req)
-            if string.contains(q, "location") == 1 {
-                http.response_set_status(res, 200)
-                http.response_set_header(res, "Content-Type", "application/xml")
-                http.response_set_body(res, s3xml.location_constraint_xml(region.REGION))
-                return
-            }
-        }
+    if _query_has(req, "location") == 1 {
+        http.response_set_status(res, 200)
+        http.response_set_header(res, "Content-Type", "application/xml")
+        http.response_set_body(res, s3xml.location_constraint_xml(region.REGION))
+        return
     }
     handle_list_objects(req, res, ud)
 }
@@ -368,5 +581,6 @@ register_routes(server: ptr) {
     http.server_put(server, "/:bucket/*", handle_put_object, 0)
     http.server_get(server, "/:bucket/*", handle_get_object, 0)
     http.server_add_route(server, "HEAD", "/:bucket/*", handle_head_object, 0)
+    http.server_post(server, "/:bucket/*", handle_post_object, 0)
     http.server_delete(server, "/:bucket/*", handle_delete_object, 0)
 }

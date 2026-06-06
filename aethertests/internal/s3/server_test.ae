@@ -12,12 +12,24 @@ import s3server
 import contrib.sqlite
 import std.string
 import uuid
+import multipart
 
 extern http_server_start_background_raw(server: ptr) -> int
 extern http_server_port(server: ptr) -> int
 extern sleep(ms: int)
 
 const TOKEN = "AKIATEST.secretvalue"
+
+// Extract the substring between `open` and `close` markers ("" if absent).
+_between(s: string, open: string, close: string) -> string {
+    i = string.index_of(s, open)
+    if i < 0 { return "" }
+    start = i + string.length(open)
+    rest = string.substring(s, start, string.length(s))
+    j = string.index_of(rest, close)
+    if j < 0 { return "" }
+    return string.substring(rest, 0, j)
+}
 
 // Issue a GET/PUT/DELETE with bearer auth, return the v2 response ptr.
 _req(method: string, port: int, path: string, body: string) -> ptr {
@@ -106,6 +118,39 @@ main() {
     st_gone = client.response_status(rg2)
     client.response_free(rg2)
 
+    // --- multipart flow ---
+    // 10. initiate
+    ri = _req("POST", port, "/mybucket/multi.bin?uploads", "")
+    st_init = client.response_status(ri)
+    init_body = string.copy(client.response_body(ri))
+    client.response_free(ri)
+    // extract UploadId from <UploadId>...</UploadId>
+    upid = _between(init_body, "<UploadId>", "</UploadId>")
+
+    // 11. upload two parts
+    p1url = "/mybucket/multi.bin?uploadId=${upid}&partNumber=1"
+    rp1 = _req("PUT", port, p1url, "AAAAAAAAAA")
+    st_p1 = client.response_status(rp1)
+    client.response_free(rp1)
+    p2url = "/mybucket/multi.bin?uploadId=${upid}&partNumber=2"
+    rp2 = _req("PUT", port, p2url, "BBBBBBBBBB")
+    st_p2 = client.response_status(rp2)
+    client.response_free(rp2)
+
+    // 12. complete
+    curl = "/mybucket/multi.bin?uploadId=${upid}"
+    rcm = _req("POST", port, curl, "<CompleteMultipartUpload></CompleteMultipartUpload>")
+    st_complete = client.response_status(rcm)
+    client.response_free(rcm)
+
+    // 13. get assembled object
+    rga = _req("GET", port, "/mybucket/multi.bin", "")
+    st_assembled = client.response_status(rga)
+    asm_body = client.response_body(rga)
+    asm_ok = 0
+    if string.equals(asm_body, "AAAAAAAAAABBBBBBBBBB") == 1 { asm_ok = 1 }
+    client.response_free(rga)
+
     http.server_stop(s)
 
     aeocha.describe(fw, "s3 server end-to-end") {
@@ -135,6 +180,14 @@ main() {
         aeocha.it("delete then gone") callback {
             aeocha.assert_eq(fw, st_del, 204, "204 delete")
             aeocha.assert_eq(fw, st_gone, 404, "404 after delete")
+        }
+        aeocha.it("multipart upload assembles") callback {
+            aeocha.assert_eq(fw, st_init, 200, "200 initiate")
+            aeocha.assert_eq(fw, st_p1, 200, "200 part1")
+            aeocha.assert_eq(fw, st_p2, 200, "200 part2")
+            aeocha.assert_eq(fw, st_complete, 200, "200 complete")
+            aeocha.assert_eq(fw, st_assembled, 200, "200 get assembled")
+            aeocha.assert_eq(fw, asm_ok, 1, "parts concatenated in order")
         }
     }
 
