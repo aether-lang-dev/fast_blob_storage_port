@@ -188,8 +188,59 @@ handle_head_bucket(req: ptr, res: ptr, ud: ptr) {
     http.response_set_body(res, "")
 }
 
-// DELETE /:bucket — DeleteBucket (must be empty).
+// DELETE /:bucket dispatcher — bulk DeleteObjects if ?delete, else DeleteBucket.
 handle_delete_bucket(req: ptr, res: ptr, ud: ptr) {
+    if _query_has(req, "delete") == 1 {
+        _delete_objects_impl(req, res)
+        return
+    }
+    _delete_bucket_impl(req, res)
+}
+
+// Bulk delete: POST/DELETE /:bucket?delete with <Delete><Object><Key>..
+_delete_objects_impl(req: ptr, res: ptr) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" {
+        _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
+        return
+    }
+    bucket = http.get_path_param(req, "bucket")
+    db = appstate_get_db()
+    data_dir = appstate_get_data_dir()
+    body = http.request_body(req)
+
+    out = s3xml.delete_result_open()
+    // extract each <Key>...</Key>
+    rest = body
+    loop_guard = 0
+    while loop_guard < 10000 {
+        ki = string.index_of(rest, "<Key>")
+        if ki < 0 { loop_guard = 10000 }
+        else {
+            tail_x = string.substring(rest, ki + 5, string.length(rest))
+            ke = string.index_of(tail_x, "</Key>")
+            if ke < 0 { loop_guard = 10000 }
+            else {
+                key = string.substring(tail_x, 0, ke)
+                oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, key)
+                if gerr == "" {
+                    objects.object_delete(db, bucket, key)
+                    storage.delete_object(data_dir, sp)
+                }
+                out = string.concat(out, s3xml.delete_result_deleted_xml(key))
+                rest = string.substring(tail_x, ke + 6, string.length(tail_x))
+                loop_guard = loop_guard + 1
+            }
+        }
+    }
+    out = string.concat(out, s3xml.delete_result_close())
+    http.response_set_status(res, 200)
+    http.response_set_header(res, "Content-Type", "application/xml")
+    http.response_set_body(res, out)
+}
+
+// DELETE /:bucket — DeleteBucket (must be empty).
+_delete_bucket_impl(req: ptr, res: ptr) {
     uid, role, aerr = _authenticate(req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
@@ -215,13 +266,72 @@ handle_delete_bucket(req: ptr, res: ptr, ud: ptr) {
 // PUT /:bucket/* dispatcher — UploadPart if ?uploadId&partNumber, else PutObject.
 handle_put_object(req: ptr, res: ptr, ud: ptr) {
     upload_id = _query_param(req, "uploadId")
-    if upload_id != null {
-        if string.length(upload_id) > 0 {
-            _upload_part_impl(req, res)
+    if string.length(upload_id) > 0 {
+        _upload_part_impl(req, res)
+        return
+    }
+    // CopyObject if x-amz-copy-source present.
+    csrc = http.get_header(req, "x-amz-copy-source")
+    if csrc != null {
+        if string.length(csrc) > 0 {
+            _copy_object_impl(req, res, csrc)
             return
         }
     }
     _put_object_impl(req, res)
+}
+
+// PUT /:bucket/* with x-amz-copy-source — CopyObject.
+_copy_object_impl(req: ptr, res: ptr, copy_source: string) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" {
+        _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
+        return
+    }
+    dbucket = http.get_path_param(req, "bucket")
+    dpath = http.request_path(req)
+    dkey = _object_key(dpath, dbucket)
+    db = appstate_get_db()
+    data_dir = appstate_get_data_dir()
+
+    // parse "/srcBucket/srcKey" or "srcBucket/srcKey"
+    src = copy_source
+    if string.starts_with(src, "/") == 1 {
+        src = string.substring(src, 1, string.length(src))
+    }
+    slash = string.index_of(src, "/")
+    if slash < 0 {
+        _send_error(res, 400, "InvalidRequest", "The request is invalid.", dpath)
+        return
+    }
+    sbucket = string.substring(src, 0, slash)
+    skey = string.substring(src, slash + 1, string.length(src))
+
+    soid, ssize, setag, sct, ssp, screated, supdated, sgerr = objects.object_get(db, sbucket, skey)
+    if sgerr != "" {
+        _send_error(res, 404, "NoSuchKey", "The specified key does not exist.", dpath)
+        return
+    }
+    if buckets.bucket_exists(db, dbucket) == 0 {
+        _send_error(res, 404, "NoSuchBucket", "The specified bucket does not exist.", dpath)
+        return
+    }
+    data, dlen, rerr = storage.read(data_dir, ssp)
+    if rerr != "" {
+        _send_error(res, 404, "NoSuchKey", "The specified key does not exist.", dpath)
+        return
+    }
+    nsp, nsize, werr = storage.write(data_dir, dbucket, dkey, data, dlen)
+    if werr != "" {
+        _send_error(res, 400, "InvalidRequest", werr, dpath)
+        return
+    }
+    etag = _etag(data, dlen)
+    oid = uuid.new_uuid()
+    objects.object_upsert(db, oid, dbucket, dkey, nsize, etag, sct, nsp, "", "")
+    http.response_set_status(res, 200)
+    http.response_set_header(res, "Content-Type", "application/xml")
+    http.response_set_body(res, s3xml.copy_object_xml(supdated, etag))
 }
 
 // PUT /:bucket/* — PutObject.
@@ -571,12 +681,22 @@ handle_bucket_get(req: ptr, res: ptr, ud: ptr) {
 }
 
 // Register all S3 routes on the server.
+// POST /:bucket — bulk DeleteObjects if ?delete, else 501.
+handle_bucket_post(req: ptr, res: ptr, ud: ptr) {
+    if _query_has(req, "delete") == 1 {
+        _delete_objects_impl(req, res)
+        return
+    }
+    _send_error(res, 501, "NotImplemented", "Not implemented.", http.request_path(req))
+}
+
 register_routes(server: ptr) {
     http.server_get(server, "/", handle_list_buckets, 0)
     http.server_put(server, "/:bucket", handle_create_bucket, 0)
     http.server_get(server, "/:bucket", handle_bucket_get, 0)
     http.server_add_route(server, "HEAD", "/:bucket", handle_head_bucket, 0)
     http.server_delete(server, "/:bucket", handle_delete_bucket, 0)
+    http.server_post(server, "/:bucket", handle_bucket_post, 0)
 
     http.server_put(server, "/:bucket/*", handle_put_object, 0)
     http.server_get(server, "/:bucket/*", handle_get_object, 0)

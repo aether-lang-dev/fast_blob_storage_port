@@ -146,10 +146,38 @@ main() {
     // 13. get assembled object
     rga = _req("GET", port, "/mybucket/multi.bin", "")
     st_assembled = client.response_status(rga)
-    asm_body = client.response_body(rga)
+    asm_body = string.copy(client.response_body(rga))
     asm_ok = 0
     if string.equals(asm_body, "AAAAAAAAAABBBBBBBBBB") == 1 { asm_ok = 1 }
     client.response_free(rga)
+
+    // --- copy object ---
+    rsrc = _req("PUT", port, "/mybucket/src.txt", "copy me")
+    client.response_free(rsrc)
+    rcp = client.request("PUT", "http://127.0.0.1:${port}/mybucket/dst.txt")
+    client.set_timeout(rcp, 5s)
+    client.set_header(rcp, "Authorization", "Bearer AKIATEST.secretvalue")
+    client.set_header(rcp, "x-amz-copy-source", "/mybucket/src.txt")
+    resp_cp, ecp = client.send_request(rcp)
+    client.request_free(rcp)
+    st_copy = client.response_status(resp_cp)
+    client.response_free(resp_cp)
+    rcpg = _req("GET", port, "/mybucket/dst.txt", "")
+    copy_body = string.copy(client.response_body(rcpg))
+    copy_ok = 0
+    if string.equals(copy_body, "copy me") == 1 { copy_ok = 1 }
+    client.response_free(rcpg)
+
+    // --- bulk delete ---
+    rbd = _req("POST", port, "/mybucket?delete", "<Delete><Object><Key>src.txt</Key></Object><Object><Key>dst.txt</Key></Object></Delete>")
+    st_bulk = client.response_status(rbd)
+    bulk_body = string.copy(client.response_body(rbd))
+    bulk_ok = 0
+    if string.contains(bulk_body, "src.txt") == 1 { bulk_ok = 1 }
+    client.response_free(rbd)
+    rchk = _req("GET", port, "/mybucket/src.txt", "")
+    st_bulk_gone = client.response_status(rchk)
+    client.response_free(rchk)
 
     http.server_stop(s)
 
@@ -188,6 +216,15 @@ main() {
             aeocha.assert_eq(fw, st_complete, 200, "200 complete")
             aeocha.assert_eq(fw, st_assembled, 200, "200 get assembled")
             aeocha.assert_eq(fw, asm_ok, 1, "parts concatenated in order")
+        }
+        aeocha.it("copy object") callback {
+            aeocha.assert_eq(fw, st_copy, 200, "200 copy")
+            aeocha.assert_eq(fw, copy_ok, 1, "copy body matches source")
+        }
+        aeocha.it("bulk delete") callback {
+            aeocha.assert_eq(fw, st_bulk, 200, "200 bulk delete")
+            aeocha.assert_eq(fw, bulk_ok, 1, "delete result lists key")
+            aeocha.assert_eq(fw, st_bulk_gone, 404, "objects gone")
         }
     }
 
