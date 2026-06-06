@@ -1,4 +1,4 @@
-// cmd_ae/main — fbs-core server entry point (Aether). Opens the SQLite
+// cmd/main — fbs-core server entry point (Aether). Opens the SQLite
 // metadata store, applies the schema, ensures the data dir, wires the S3
 // + management/setup routes, and serves. Config via env with defaults
 // matching internal/config: FBS_HTTP_ADDR (host:port), FBS_DB_PATH,

@@ -2,7 +2,7 @@
 //
 // The server links contrib/sqlite (libsqlite3) and the appstate.c
 // global-handle holder. extra_source/link_flag opt into aeb's
-// manual-link path. The lib modules under lib/ + internal_ae/ resolve
+// manual-link path. The lib modules under lib/ + internal/ resolve
 // via the project lib path.
 
 import build
@@ -12,7 +12,7 @@ main() {
     b = build.start()
     aether.program(b) {
         source("main.ae")
-        extra_source("../internal_ae/s3/appstate.c")
+        extra_source("../internal/s3/appstate.c")
         extra_source("../../aether/contrib/sqlite/aether_sqlite.c")
         link_flag("-lsqlite3")
     }

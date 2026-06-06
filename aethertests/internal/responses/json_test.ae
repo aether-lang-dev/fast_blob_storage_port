@@ -1,4 +1,4 @@
-// Integration test for internal_ae/responses/json.ae.
+// Integration test for internal/responses/responses.ae.
 //
 // A bare server `res` ptr can't be inspected off-server (the client
 // accessors read uninitialised fields), so we stand up a live

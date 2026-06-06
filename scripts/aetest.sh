@@ -4,7 +4,7 @@
 # Module resolution in Aether keys on AETHER_LIB_DIR (NOT
 # AETHER_INCLUDE_PATH — that var is ignored). We assemble a single flat
 # lib root (.ae_test_lib/) of symlinks: vendored aeocha plus every
-# ported lib/*/*.ae and internal_ae/*/*.ae module, addressed by bare
+# ported lib/*/*.ae and internal/*/*.ae module, addressed by bare
 # basename so `import hmac` / `import urlescape` / `import signer` etc.
 # resolve. Then run each aethertests/**/ *_test.ae through `ae run`.
 #
@@ -29,7 +29,7 @@ mkdir -p "$LIBDIR"
 ln -sf "$AEOCHA/aeocha.ae" "$LIBDIR/aeocha.ae"
 
 # Flatten every ported module to <basename>.ae in the lib root.
-for f in $(find "$ROOT/lib" "$ROOT/internal_ae" -name '*.ae' 2>/dev/null); do
+for f in $(find "$ROOT/lib" "$ROOT/internal" -name '*.ae' 2>/dev/null); do
     ln -sf "$f" "$LIBDIR/$(basename "$f")"
 done
 

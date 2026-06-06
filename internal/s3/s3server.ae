@@ -3,7 +3,7 @@
 // (db handle + data_dir) lives in appstate.c statics, read by handlers.
 //
 // Auth: bearer token (access_key.secret) verified against the users
-// table. SigV4 request verification reuses internal_ae/auth (the crypto
+// table. SigV4 request verification reuses internal/auth (the crypto
 // is proven); wiring the full canonical-query assembly is a follow-up —
 // bearer covers the management + test path end-to-end.
 

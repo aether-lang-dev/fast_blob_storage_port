@@ -6,10 +6,11 @@
 
 The `fbs-core` backend handles all S3-compatible data operations, disk I/O, and exposes a Management API for external dashboards (such as a Web Dashboard or Terminal Dashboard). 
 
-- **Language:** Go
-- **Storage Metadata:** SQLite (WAL mode)
-- **Object Storage:** Local File System (Zero-copy transfers utilizing OS Page Cache `sendfile`)
-- **Routing:** `chi` router
+- **Language:** [Aether](https://github.com/aether-lang-org/aether) (compiles to C). Originally Go; see `BUILD-AETHER.md` for the port.
+- **Storage Metadata:** SQLite (WAL mode) via `contrib.sqlite`
+- **Object Storage:** Local File System (atomic write via `std.fs.write_atomic`)
+- **HTTP:** `std.http` server; tests use the [aeocha](https://github.com/aether-lang-org/aeocha) BDD framework
+- **Build:** `aeb` (`cmd/.build.ae`) or `ae build` with an `aether.toml` linking `-lsqlite3`
 
 ## Features
 
@@ -47,17 +48,15 @@ Management and S3 protected routes accept either `Authorization: Bearer ...` or 
 
 ## Project Structure
 
-- `cmd/server/`: Main application entry point.
+- `cmd/`: Main application entry point (`main.ae`, `.build.ae`).
 - `internal/`:
-  - `auth/`: Authentication framework (AWS SigV4 & Bearer tokens).
-  - `config/`: Application configuration parsing.
-  - `http/`: HTTP router and core middleware (logging, recovery).
-  - `metadata/`: SQLite database interactions for buckets, objects, and multipart uploads.
-  - `setup/`: Loopback-only first-start bootstrap endpoints.
-  - `s3/`: S3 API handlers and protocol logic.
-  - `server/`: Server initialization and lifecycle management.
-  - `storage/`: Disk storage engine (read, write, delete, path sanitizing, and reconciliation).
-- `migrations/`: SQLite database schemas and migrations.
+  - `auth/`: Authentication (AWS SigV4 & Bearer tokens) + token issuance.
+  - `metadata/`: SQLite schema + repositories (buckets, objects, users, multipart, activity, management).
+  - `s3/`: S3 API handlers, route wiring, XML, setup/management API, startup reconcile, `appstate.c`.
+  - `s3compat/`, `responses/`, `publicread/`: region constant, JSON response helper, signed public-read URLs.
+  - `storage/`: Disk storage engine (write/read/delete, path sanitizing, multipart).
+- `lib/`: Reusable Aether libs — `crypto/` (HMAC-SHA256, SigV4), `urlescape/`, `pathutil/`, `uuid/`.
+- `aethertests/`: aeocha test suites mirroring the source tree.
 - `docs/`: Completed project documentation for architecture, configuration, APIs, storage, operations, and development.
 
 ## Documentation

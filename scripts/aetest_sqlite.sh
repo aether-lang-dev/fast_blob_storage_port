@@ -31,7 +31,7 @@ rm -rf "$HOME/.aether/cache" 2>/dev/null || true
 # (Re)build the flat lib root of symlinks.
 rm -rf "$LIBDIR"; mkdir -p "$LIBDIR"
 ln -sf "$AEOCHA/aeocha.ae" "$LIBDIR/aeocha.ae"
-for f in $(find "$ROOT/lib" "$ROOT/internal_ae" -name '*.ae' 2>/dev/null); do
+for f in $(find "$ROOT/lib" "$ROOT/internal" -name '*.ae' 2>/dev/null); do
     ln -sf "$f" "$LIBDIR/$(basename "$f")"
 done
 
@@ -40,9 +40,9 @@ ln -s "$AETHER/contrib" "$WORK/contrib"
 cp "$TEST" "$WORK/probe.ae"
 
 # Server integration tests also need the appstate.c global-handle source.
-APPSTATE="$ROOT/internal_ae/s3/appstate.c"
+APPSTATE="$ROOT/internal/s3/appstate.c"
 EXTRA_APPSTATE=""
-if grep -q 'appstate_' "$TEST" 2>/dev/null || grep -lq 'appstate_' "$ROOT/internal_ae/s3/"*.ae 2>/dev/null; then
+if grep -q 'appstate_' "$TEST" 2>/dev/null || grep -lq 'appstate_' "$ROOT/internal/s3/"*.ae 2>/dev/null; then
     cp "$APPSTATE" "$WORK/appstate.c"
     EXTRA_APPSTATE=', "appstate.c"'
 fi
