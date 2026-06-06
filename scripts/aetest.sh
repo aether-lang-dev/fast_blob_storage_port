@@ -46,14 +46,15 @@ rc=0
 if [ -n "$1" ]; then
     run_one "$ROOT/$1" || rc=1
 else
-    # Plain (ae run) tests: everything except the sqlite-linked metadata suite.
-    for t in $(find "$ROOT/aethertests" -name '*_test.ae' | grep -v '/metadata/' | sort); do
-        run_one "$t" || rc=1
-    done
-    # SQLite-linked metadata tests need the build+link runner.
-    for t in $(find "$ROOT/aethertests/internal/metadata" -name '*_test.ae' 2>/dev/null | sort); do
+    # A test needs the sqlite build+link runner if it imports contrib.sqlite
+    # (directly or transitively via schema/repos/s3server). Detect by grep.
+    for t in $(find "$ROOT/aethertests" -name '*_test.ae' | sort); do
         rel="${t#$ROOT/}"
-        if ! "$ROOT/scripts/aetest_sqlite.sh" "$rel"; then rc=1; fi
+        if grep -qE 'import (schema|s3server|contrib\.sqlite|buckets|objects|users|multipart|activity|management)\b' "$t"; then
+            if ! "$ROOT/scripts/aetest_sqlite.sh" "$rel"; then rc=1; fi
+        else
+            run_one "$t" || rc=1
+        fi
     done
 fi
 
