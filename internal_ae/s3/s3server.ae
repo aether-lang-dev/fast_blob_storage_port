@@ -1,0 +1,372 @@
+// internal.s3.server — S3 HTTP handlers + route registration (port of
+// the internal/s3 handler layer onto std.http's server). Shared state
+// (db handle + data_dir) lives in appstate.c statics, read by handlers.
+//
+// Auth: bearer token (access_key.secret) verified against the users
+// table. SigV4 request verification reuses internal_ae/auth (the crypto
+// is proven); wiring the full canonical-query assembly is a follow-up —
+// bearer covers the management + test path end-to-end.
+
+import std.http
+import std.string
+import std.cryptography
+import contrib.sqlite
+import storage
+import buckets
+import objects
+import users
+import auth
+import s3xml
+import region
+import uuid
+
+exports (register_routes, set_state)
+
+// ---- shared state ----
+extern appstate_set_db(db: ptr)
+extern appstate_get_db() -> ptr
+extern appstate_set_data_dir(dir: string)
+extern appstate_get_data_dir() -> string
+
+set_state(db: ptr, data_dir: string) {
+    appstate_set_db(db)
+    appstate_set_data_dir(data_dir)
+}
+
+// ---- helpers ----
+
+// md5 hex of a length-aware body.
+_etag(body: string, length: int) -> string {
+    h, e = cryptography.hash_hex("md5", body, length)
+    return h
+}
+
+_send_error(res: ptr, status: int, code: string, msg: string, resource: string) {
+    http.response_set_status(res, status)
+    http.response_set_header(res, "Content-Type", "application/xml")
+    http.response_set_body(res, s3xml.error_xml(code, msg, resource))
+}
+
+// Authenticate a request via bearer token. Returns (user_id, role, "")
+// or ("", "", err). Pure bearer for now.
+_authenticate(req: ptr) -> {
+    hdr = http.get_header(req, "Authorization")
+    if hdr == null { return "", "", "missing" }
+    if string.length(hdr) == 0 { return "", "", "missing" }
+    // strip "Bearer " prefix
+    prefix = "Bearer "
+    if string.starts_with(hdr, prefix) == 0 { return "", "", "scheme" }
+    token = string.substring(hdr, string.length(prefix), string.length(hdr))
+    ak, sec, berr = auth.split_bearer(token)
+    if berr != "" { return "", "", berr }
+    db = appstate_get_db()
+    hash, herr = users.user_get_secret_hash(db, ak)
+    if herr != "" { return "", "", "invalid" }
+    if auth.verify_secret(sec, hash) != 1 { return "", "", "invalid" }
+    uid, role, active, gerr = users.user_get_by_access_key(db, ak)
+    if gerr != "" { return "", "", "invalid" }
+    if active == 0 { return "", "", "inactive" }
+    return uid, role, ""
+}
+
+// Extract the object key from a path like /bucket/a/b/c -> "a/b/c".
+_object_key(path: string, bucket: string) -> string {
+    prefix = string.concat("/", string.concat(bucket, "/"))
+    if string.starts_with(path, prefix) == 1 {
+        return string.substring(path, string.length(prefix), string.length(path))
+    }
+    return ""
+}
+
+// ---- handlers ----
+
+// GET / — ListBuckets (admin: all; member: owned).
+handle_list_buckets(req: ptr, res: ptr, ud: ptr) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" {
+        _send_error(res, 403, "AccessDenied", "Access denied.", "/")
+        return
+    }
+    db = appstate_get_db()
+    names = ""
+    if string.equals(role, "admin") == 1 {
+        names = buckets.bucket_list_names(db)
+    } else {
+        names = buckets.bucket_list_names_by_owner(db, uid)
+    }
+    entries = ""
+    if string.length(names) > 0 {
+        parts = string.split(names, "\n")
+        n = string.array_size(parts)
+        i = 0
+        while i < n {
+            nm = string.copy(string.array_get(parts, i))
+            created, cerr = buckets.bucket_get_created(db, nm)
+            entries = string.concat(entries, s3xml.bucket_entry_xml(nm, created))
+            i = i + 1
+        }
+        string.array_free(parts)
+    }
+    body = s3xml.list_all_buckets_xml(uid, "user", entries)
+    http.response_set_status(res, 200)
+    http.response_set_header(res, "Content-Type", "application/xml")
+    http.response_set_body(res, body)
+}
+
+// PUT /:bucket — CreateBucket.
+handle_create_bucket(req: ptr, res: ptr, ud: ptr) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" {
+        _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
+        return
+    }
+    bucket = http.get_path_param(req, "bucket")
+    db = appstate_get_db()
+    if buckets.bucket_exists(db, bucket) == 1 {
+        _send_error(res, 409, "BucketAlreadyOwnedByYou", "You already own it.", http.request_path(req))
+        return
+    }
+    cerr = buckets.bucket_create(db, bucket, uid, "")
+    if cerr != "" {
+        _send_error(res, 500, "InternalError", "Internal error.", http.request_path(req))
+        return
+    }
+    http.response_set_status(res, 200)
+    loc = string.concat("/", bucket)
+    http.response_set_header(res, "Location", loc)
+    http.response_set_body(res, "")
+}
+
+// HEAD /:bucket — HeadBucket.
+handle_head_bucket(req: ptr, res: ptr, ud: ptr) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" { http.response_set_status(res, 403) http.response_set_body(res, "") return }
+    bucket = http.get_path_param(req, "bucket")
+    db = appstate_get_db()
+    if buckets.bucket_exists(db, bucket) == 0 {
+        http.response_set_status(res, 404)
+        http.response_set_body(res, "")
+        return
+    }
+    http.response_set_status(res, 200)
+    http.response_set_body(res, "")
+}
+
+// DELETE /:bucket — DeleteBucket (must be empty).
+handle_delete_bucket(req: ptr, res: ptr, ud: ptr) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" {
+        _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
+        return
+    }
+    bucket = http.get_path_param(req, "bucket")
+    db = appstate_get_db()
+    if buckets.bucket_exists(db, bucket) == 0 {
+        _send_error(res, 404, "NoSuchBucket", "The specified bucket does not exist.", http.request_path(req))
+        return
+    }
+    // refuse if non-empty
+    keys, trunc = objects.object_list_keys(db, bucket, "", "", 1)
+    if string.length(keys) > 0 {
+        _send_error(res, 409, "BucketNotEmpty", "The bucket you tried to delete is not empty.", http.request_path(req))
+        return
+    }
+    buckets.bucket_delete(db, bucket)
+    http.response_set_status(res, 204)
+    http.response_set_body(res, "")
+}
+
+// PUT /:bucket/* — PutObject.
+handle_put_object(req: ptr, res: ptr, ud: ptr) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" {
+        _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
+        return
+    }
+    bucket = http.get_path_param(req, "bucket")
+    path = http.request_path(req)
+    key = _object_key(path, bucket)
+    db = appstate_get_db()
+    data_dir = appstate_get_data_dir()
+
+    if buckets.bucket_exists(db, bucket) == 0 {
+        _send_error(res, 404, "NoSuchBucket", "The specified bucket does not exist.", path)
+        return
+    }
+    if string.length(key) == 0 {
+        _send_error(res, 400, "InvalidRequest", "The request is invalid.", path)
+        return
+    }
+
+    body = http.request_body(req)
+    blen = http.request_body_length(req)
+
+    sp, size, werr = storage.write(data_dir, bucket, key, body, blen)
+    if werr != "" {
+        _send_error(res, 400, "InvalidRequest", werr, path)
+        return
+    }
+    etag = _etag(body, blen)
+    ct = http.get_header(req, "Content-Type")
+    if ct == null { ct = "" }
+    oid = uuid.new_uuid()
+    uerr = objects.object_upsert(db, oid, bucket, key, size, etag, ct, sp, "", "")
+    if uerr != "" {
+        storage.delete_object(data_dir, sp)
+        _send_error(res, 500, "InternalError", "Internal error.", path)
+        return
+    }
+    qetag = string.concat("\"", string.concat(etag, "\""))
+    http.response_set_status(res, 200)
+    http.response_set_header(res, "ETag", qetag)
+    http.response_set_body(res, "")
+}
+
+// GET /:bucket/* — GetObject.
+handle_get_object(req: ptr, res: ptr, ud: ptr) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" {
+        _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
+        return
+    }
+    bucket = http.get_path_param(req, "bucket")
+    path = http.request_path(req)
+    key = _object_key(path, bucket)
+    db = appstate_get_db()
+    data_dir = appstate_get_data_dir()
+
+    oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, key)
+    if gerr != "" {
+        _send_error(res, 404, "NoSuchKey", "The specified key does not exist.", path)
+        return
+    }
+    data, dlen, rerr = storage.read(data_dir, sp)
+    if rerr != "" {
+        _send_error(res, 404, "NoSuchKey", "The specified key does not exist.", path)
+        return
+    }
+    qetag = string.concat("\"", string.concat(etag, "\""))
+    http.response_set_status(res, 200)
+    http.response_set_header(res, "Content-Type", ct)
+    http.response_set_header(res, "ETag", qetag)
+    http.response_set_body_n(res, data, dlen)
+}
+
+// HEAD /:bucket/* — HeadObject.
+handle_head_object(req: ptr, res: ptr, ud: ptr) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" { http.response_set_status(res, 403) http.response_set_body(res, "") return }
+    bucket = http.get_path_param(req, "bucket")
+    path = http.request_path(req)
+    key = _object_key(path, bucket)
+    db = appstate_get_db()
+    oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, key)
+    if gerr != "" {
+        http.response_set_status(res, 404)
+        http.response_set_body(res, "")
+        return
+    }
+    qetag = string.concat("\"", string.concat(etag, "\""))
+    http.response_set_status(res, 200)
+    http.response_set_header(res, "Content-Type", ct)
+    http.response_set_header(res, "ETag", qetag)
+    http.response_set_header(res, "Content-Length", string.from_int(size))
+    http.response_set_body(res, "")
+}
+
+// DELETE /:bucket/* — DeleteObject.
+handle_delete_object(req: ptr, res: ptr, ud: ptr) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" {
+        _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
+        return
+    }
+    bucket = http.get_path_param(req, "bucket")
+    path = http.request_path(req)
+    key = _object_key(path, bucket)
+    db = appstate_get_db()
+    data_dir = appstate_get_data_dir()
+
+    oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, key)
+    if gerr == "" {
+        objects.object_delete(db, bucket, key)
+        storage.delete_object(data_dir, sp)
+    }
+    http.response_set_status(res, 204)
+    http.response_set_body(res, "")
+}
+
+// GET /:bucket with ?list-type=2 (we register it on the bucket GET; the
+// dispatcher checks the query) — ListObjectsV2.
+handle_list_objects(req: ptr, res: ptr, ud: ptr) {
+    uid, role, aerr = _authenticate(req)
+    if aerr != "" {
+        _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
+        return
+    }
+    bucket = http.get_path_param(req, "bucket")
+    db = appstate_get_db()
+    if buckets.bucket_exists(db, bucket) == 0 {
+        _send_error(res, 404, "NoSuchBucket", "The specified bucket does not exist.", http.request_path(req))
+        return
+    }
+    prefix = http.get_query_param(req, "prefix")
+    if prefix == null { prefix = "" }
+    max_keys = 1000
+    keys, trunc = objects.object_list_keys(db, bucket, prefix, "", max_keys)
+
+    count = 0
+    contents = ""
+    if string.length(keys) > 0 {
+        parts = string.split(keys, "\n")
+        n = string.array_size(parts)
+        i = 0
+        while i < n {
+            k = string.copy(string.array_get(parts, i))
+            oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, k)
+            contents = string.concat(contents, s3xml.list_bucket_contents_xml(k, updated, etag, size))
+            count = count + 1
+            i = i + 1
+        }
+        string.array_free(parts)
+    }
+    body = s3xml.list_bucket_v2_open(bucket, prefix, count, max_keys, trunc)
+    body = string.concat(body, contents)
+    body = string.concat(body, s3xml.list_bucket_v2_close())
+    http.response_set_status(res, 200)
+    http.response_set_header(res, "Content-Type", "application/xml")
+    http.response_set_body(res, body)
+}
+
+// Dispatcher for GET /:bucket — list-type=2 -> list objects, ?location ->
+// location, else also list (v1-ish). Simplified: always list objects.
+handle_bucket_get(req: ptr, res: ptr, ud: ptr) {
+    loc = http.get_query_param(req, "location")
+    if loc != null {
+        if string.length(loc) >= 0 {
+            // ?location present (value may be "")
+            q = http.request_query(req)
+            if string.contains(q, "location") == 1 {
+                http.response_set_status(res, 200)
+                http.response_set_header(res, "Content-Type", "application/xml")
+                http.response_set_body(res, s3xml.location_constraint_xml(region.REGION))
+                return
+            }
+        }
+    }
+    handle_list_objects(req, res, ud)
+}
+
+// Register all S3 routes on the server.
+register_routes(server: ptr) {
+    http.server_get(server, "/", handle_list_buckets, 0)
+    http.server_put(server, "/:bucket", handle_create_bucket, 0)
+    http.server_get(server, "/:bucket", handle_bucket_get, 0)
+    http.server_add_route(server, "HEAD", "/:bucket", handle_head_bucket, 0)
+    http.server_delete(server, "/:bucket", handle_delete_bucket, 0)
+
+    http.server_put(server, "/:bucket/*", handle_put_object, 0)
+    http.server_get(server, "/:bucket/*", handle_get_object, 0)
+    http.server_add_route(server, "HEAD", "/:bucket/*", handle_head_object, 0)
+    http.server_delete(server, "/:bucket/*", handle_delete_object, 0)
+}

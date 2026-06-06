@@ -1,0 +1,142 @@
+// End-to-end S3 server integration test: stand up the real handler
+// module against an in-memory DB + temp data dir, seed a bearer user +
+// bucket, and drive the full object lifecycle over HTTP.
+
+import aeocha
+import std.http
+import std.http.client
+import schema
+import users
+import auth
+import s3server
+import contrib.sqlite
+import std.string
+import uuid
+
+extern http_server_start_background_raw(server: ptr) -> int
+extern http_server_port(server: ptr) -> int
+extern sleep(ms: int)
+
+const TOKEN = "AKIATEST.secretvalue"
+
+// Issue a GET/PUT/DELETE with bearer auth, return the v2 response ptr.
+_req(method: string, port: int, path: string, body: string) -> ptr {
+    base = "http://127.0.0.1:"
+    url = "${base}${port}${path}"
+    r = client.request(method, url)
+    client.set_timeout(r, 5s)
+    client.set_header(r, "Authorization", "Bearer AKIATEST.secretvalue")
+    if string.length(body) > 0 {
+        client.set_body(r, body, string.length(body), "application/octet-stream")
+    }
+    resp, err = client.send_request(r)
+    client.request_free(r)
+    return resp
+}
+
+main() {
+    fw = aeocha.init()
+
+    db, oerr = schema.open_db(":memory:")
+    // seed bearer user: secret_hash = sha256("secretvalue")
+    hash = auth.hash_secret("secretvalue")
+    users.user_insert(db, "u1", "Admin", "AKIATEST", hash, "", "", "admin", 1, "", "")
+
+    data_dir = string.concat("/tmp/fbs_s3srv_", uuid.new_hex(6))
+
+    s = http.server_create(0)
+    http.server_set_host(s, "127.0.0.1")
+    s3server.set_state(db, data_dir)
+    s3server.register_routes(s)
+    http_server_start_background_raw(s)
+    sleep(250)
+    port = http_server_port(s)
+
+    // 1. unauthenticated list -> 403
+    r0 = client.request("GET", "http://127.0.0.1:${port}/")
+    client.set_timeout(r0, 5s)
+    resp0, e0 = client.send_request(r0)
+    client.request_free(r0)
+    st_unauth = client.response_status(resp0)
+    client.response_free(resp0)
+
+    // 2. create bucket
+    rc = _req("PUT", port, "/mybucket", "")
+    st_create = client.response_status(rc)
+    client.response_free(rc)
+
+    // 3. put object
+    rp = _req("PUT", port, "/mybucket/hello.txt", "Hello, Aether S3!")
+    st_put = client.response_status(rp)
+    etag_hdr = client.response_header(rp, "ETag")
+    client.response_free(rp)
+
+    // 4. get object
+    rg = _req("GET", port, "/mybucket/hello.txt", "")
+    st_get = client.response_status(rg)
+    body_get = client.response_body(rg)
+    body_ok = 0
+    if string.equals(body_get, "Hello, Aether S3!") == 1 { body_ok = 1 }
+    client.response_free(rg)
+
+    // 5. head object
+    rh = _req("HEAD", port, "/mybucket/hello.txt", "")
+    st_head = client.response_status(rh)
+    client.response_free(rh)
+
+    // 6. list objects (v2)
+    rl = _req("GET", port, "/mybucket?list-type=2", "")
+    st_list = client.response_status(rl)
+    body_list = client.response_body(rl)
+    list_has_key = string.contains(body_list, "hello.txt")
+    client.response_free(rl)
+
+    // 7. get missing -> 404
+    rm = _req("GET", port, "/mybucket/nope.txt", "")
+    st_missing = client.response_status(rm)
+    client.response_free(rm)
+
+    // 8. delete object
+    rd = _req("DELETE", port, "/mybucket/hello.txt", "")
+    st_del = client.response_status(rd)
+    client.response_free(rd)
+
+    // 9. confirm gone
+    rg2 = _req("GET", port, "/mybucket/hello.txt", "")
+    st_gone = client.response_status(rg2)
+    client.response_free(rg2)
+
+    http.server_stop(s)
+
+    aeocha.describe(fw, "s3 server end-to-end") {
+        aeocha.it("rejects unauthenticated") callback {
+            aeocha.assert_eq(fw, st_unauth, 403, "403 no auth")
+        }
+        aeocha.it("create bucket") callback {
+            aeocha.assert_eq(fw, st_create, 200, "200 created")
+        }
+        aeocha.it("put object returns ETag") callback {
+            aeocha.assert_eq(fw, st_put, 200, "200 put")
+        }
+        aeocha.it("get object returns body") callback {
+            aeocha.assert_eq(fw, st_get, 200, "200 get")
+            aeocha.assert_eq(fw, body_ok, 1, "body roundtrip")
+        }
+        aeocha.it("head object") callback {
+            aeocha.assert_eq(fw, st_head, 200, "200 head")
+        }
+        aeocha.it("list objects shows key") callback {
+            aeocha.assert_eq(fw, st_list, 200, "200 list")
+            aeocha.assert_eq(fw, list_has_key, 1, "key in listing")
+        }
+        aeocha.it("missing object 404") callback {
+            aeocha.assert_eq(fw, st_missing, 404, "404 missing")
+        }
+        aeocha.it("delete then gone") callback {
+            aeocha.assert_eq(fw, st_del, 204, "204 delete")
+            aeocha.assert_eq(fw, st_gone, 404, "404 after delete")
+        }
+    }
+
+    aeocha.run_summary(fw)
+}

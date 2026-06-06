@@ -39,6 +39,14 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 ln -s "$AETHER/contrib" "$WORK/contrib"
 cp "$TEST" "$WORK/probe.ae"
 
+# Server integration tests also need the appstate.c global-handle source.
+APPSTATE="$ROOT/internal_ae/s3/appstate.c"
+EXTRA_APPSTATE=""
+if grep -q 'appstate_' "$TEST" 2>/dev/null || grep -lq 'appstate_' "$ROOT/internal_ae/s3/"*.ae 2>/dev/null; then
+    cp "$APPSTATE" "$WORK/appstate.c"
+    EXTRA_APPSTATE=', "appstate.c"'
+fi
+
 cat > "$WORK/aether.toml" <<EOF
 [project]
 name = "metadata_probe"
@@ -47,7 +55,7 @@ version = "0.0.0"
 [[bin]]
 name = "probe"
 path = "probe.ae"
-extra_sources = ["contrib/sqlite/aether_sqlite.c"]
+extra_sources = ["contrib/sqlite/aether_sqlite.c"${EXTRA_APPSTATE}]
 
 [build]
 link_flags = "-lsqlite3"
