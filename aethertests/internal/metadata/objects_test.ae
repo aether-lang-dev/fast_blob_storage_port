@@ -1,0 +1,86 @@
+import aeocha
+import schema
+import objects
+import contrib.sqlite
+import std.string
+
+main() {
+    fw = aeocha.init()
+    db, oerr = schema.open_db(":memory:")
+    sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role) VALUES ('u','U','ak','sh','admin')")
+    sqlite.exec(db, "INSERT INTO buckets (name, owner_id) VALUES ('b','u')")
+
+    // upsert insert
+    c1 = objects.object_upsert(db, "o1", "b", "k1.txt", 10, "etag1", "text/plain", "b/sp1", "", "")
+    ins_ok = 0
+    if c1 == "" { ins_ok = 1 }
+
+    // get back
+    id, size, etag, ct, sp, cr, up, gerr = objects.object_get(db, "b", "k1.txt")
+    get_ok = 0
+    if gerr == "" && size == 10 && string.equals(etag, "etag1") == 1 && string.equals(ct, "text/plain") == 1 { get_ok = 1 }
+
+    // upsert overwrite (same bucket/key, new size/etag)
+    objects.object_upsert(db, "o2", "b", "k1.txt", 20, "etag2", "", "b/sp2", "", "")
+    _, size2, etag2, _, sp2, _, _, _ = objects.object_get(db, "b", "k1.txt")
+    over_ok = 0
+    if size2 == 20 && string.equals(etag2, "etag2") == 1 && string.equals(sp2, "b/sp2") == 1 { over_ok = 1 }
+
+    // exists
+    ex = objects.object_exists(db, "b", "k1.txt")
+    ex_ghost = objects.object_exists(db, "b", "nope")
+
+    // pagination: insert k2..k5, list with max_keys=2 -> truncated
+    objects.object_upsert(db, "oa", "b", "k2.txt", 1, "e", "", "b/a", "", "")
+    objects.object_upsert(db, "ob", "b", "k3.txt", 1, "e", "", "b/b", "", "")
+    objects.object_upsert(db, "oc", "b", "k4.txt", 1, "e", "", "b/c", "", "")
+    keys, trunc = objects.object_list_keys(db, "b", "", "", 2)
+    page_match = 0
+    if string.equals(keys, "k1.txt\nk2.txt") == 1 && trunc == 1 { page_match = 1 }
+
+    // start_after pagination
+    keys2, trunc2 = objects.object_list_keys(db, "b", "", "k2.txt", 10)
+    after_match = 0
+    if string.equals(keys2, "k3.txt\nk4.txt") == 1 && trunc2 == 0 { after_match = 1 }
+
+    // prefix filter
+    objects.object_upsert(db, "op", "b", "photos/x.jpg", 1, "e", "", "b/p", "", "")
+    keys3, _ = objects.object_list_keys(db, "b", "photos/", "", 10)
+    prefix_match = 0
+    if string.equals(keys3, "photos/x.jpg") == 1 { prefix_match = 1 }
+
+    // delete
+    derr = objects.object_delete(db, "b", "k1.txt")
+    del_ok = 0
+    if derr == "" { del_ok = 1 }
+    ex_after = objects.object_exists(db, "b", "k1.txt")
+
+    aeocha.describe(fw, "metadata.objects") {
+        aeocha.it("upsert insert + get") callback {
+            aeocha.assert_eq(fw, ins_ok, 1, "inserted")
+            aeocha.assert_eq(fw, get_ok, 1, "fields match")
+        }
+        aeocha.it("upsert overwrite") callback {
+            aeocha.assert_eq(fw, over_ok, 1, "overwritten")
+        }
+        aeocha.it("exists") callback {
+            aeocha.assert_eq(fw, ex, 1, "present")
+            aeocha.assert_eq(fw, ex_ghost, 0, "absent")
+        }
+        aeocha.it("pagination truncation") callback {
+            aeocha.assert_eq(fw, page_match, 1, "2 keys + truncated")
+        }
+        aeocha.it("start_after pagination") callback {
+            aeocha.assert_eq(fw, after_match, 1, "keys after k2")
+        }
+        aeocha.it("prefix filter") callback {
+            aeocha.assert_eq(fw, prefix_match, 1, "only photos/")
+        }
+        aeocha.it("delete") callback {
+            aeocha.assert_eq(fw, del_ok, 1, "deleted")
+            aeocha.assert_eq(fw, ex_after, 0, "gone")
+        }
+    }
+
+    aeocha.run_summary(fw)
+}

@@ -1,0 +1,67 @@
+import aeocha
+import schema
+import contrib.sqlite
+import std.string
+
+// Count rows from a COUNT(*) query (single int cell).
+_count(db: ptr, sql: string) -> int {
+    rs, err = sqlite.query(db, sql)
+    if err != "" { return -1 }
+    // copy the cell before freeing the result set — cell() borrows.
+    v = string.copy(sqlite.cell(rs, 0, 0))
+    sqlite.free(rs)
+    n, perr = string.to_int(v)
+    return n
+}
+
+main() {
+    fw = aeocha.init()
+
+    db, oerr = schema.open_db(":memory:")
+
+    // NOTE: aeocha `it` closures must not capture BOTH a ptr and a string
+    // from the same scope (aether #624 — silent segfault). So we precompute
+    // string-dependent results into int flags here and capture only db + ints.
+    open_ok = 0
+    if oerr == "" { open_ok = 1 }
+
+    table_count = _count(db, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('users','buckets','objects','multipart_uploads','multipart_parts','object_activity')")
+
+    // role CHECK: bad role must fail
+    role_rejected = 0
+    rerr = sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role) VALUES ('u1','U','ak','sh','superuser')")
+    if rerr != "" { role_rejected = 1 }
+
+    // valid user + bucket + object chain
+    u_ok = 0
+    ue = sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role) VALUES ('u2','Admin','ak2','sh2','admin')")
+    if ue == "" { u_ok = 1 }
+    b_ok = 0
+    be = sqlite.exec(db, "INSERT INTO buckets (name, owner_id) VALUES ('b1','u2')")
+    if be == "" { b_ok = 1 }
+    o_ok = 0
+    oe = sqlite.exec(db, "INSERT INTO objects (id, bucket_name, key, size, etag, storage_path) VALUES ('o1','b1','k.txt',5,'etag','b1/uuid')")
+    if oe == "" { o_ok = 1 }
+    obj_count = _count(db, "SELECT COUNT(*) FROM objects WHERE bucket_name='b1'")
+
+    aeocha.describe(fw, "metadata.schema") {
+        aeocha.it("opens and applies schema without error") callback {
+            aeocha.assert_eq(fw, open_ok, 1, "open_db ok")
+            aeocha.assert_not_null(fw, db, "db handle")
+        }
+        aeocha.it("creates all six tables") callback {
+            aeocha.assert_eq(fw, table_count, 6, "six tables")
+        }
+        aeocha.it("enforces role CHECK constraint") callback {
+            aeocha.assert_eq(fw, role_rejected, 1, "bad role rejected")
+        }
+        aeocha.it("accepts valid user + bucket + object") callback {
+            aeocha.assert_eq(fw, u_ok, 1, "user insert")
+            aeocha.assert_eq(fw, b_ok, 1, "bucket insert")
+            aeocha.assert_eq(fw, o_ok, 1, "object insert")
+            aeocha.assert_eq(fw, obj_count, 1, "one object")
+        }
+    }
+
+    aeocha.run_summary(fw)
+}

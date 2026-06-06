@@ -1,0 +1,8 @@
+// internal.s3compat — S3 compatibility constants.
+// Port of internal/s3compat/region.go.
+
+exports (REGION)
+
+// Hardcoded region advertised by the S3-compatible surface. SigV4
+// credential scope and GetBucketLocation both use this value.
+const REGION = "us-east-1"

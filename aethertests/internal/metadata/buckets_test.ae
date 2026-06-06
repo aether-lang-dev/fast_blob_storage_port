@@ -1,0 +1,64 @@
+import aeocha
+import schema
+import buckets
+import contrib.sqlite
+import std.string
+
+main() {
+    fw = aeocha.init()
+    db, oerr = schema.open_db(":memory:")
+    // owner user (FK target)
+    sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role) VALUES ('owner','O','ak','sh','admin')")
+
+    // Precompute results as ints/owned strings (avoid ptr+string capture, #624).
+    c1 = buckets.bucket_create(db, "alpha", "owner", "")
+    create_ok = 0
+    if c1 == "" { create_ok = 1 }
+
+    exists_alpha = buckets.bucket_exists(db, "alpha")
+    exists_ghost = buckets.bucket_exists(db, "ghost")
+
+    owner_alpha, oerr2 = buckets.bucket_get_owner(db, "alpha")
+    owner_match = 0
+    if string.equals(owner_alpha, "owner") == 1 { owner_match = 1 }
+
+    _, missing_err = buckets.bucket_get_owner(db, "ghost")
+    missing_is_notfound = 0
+    if string.equals(missing_err, buckets.ERR_BUCKET_NOT_FOUND) == 1 { missing_is_notfound = 1 }
+
+    buckets.bucket_create(db, "beta", "owner", "")
+    names = buckets.bucket_list_names(db)
+    names_match = 0
+    if string.equals(names, "alpha\nbeta") == 1 { names_match = 1 }
+
+    del_err = buckets.bucket_delete(db, "alpha")
+    del_ok = 0
+    if del_err == "" { del_ok = 1 }
+    exists_after_del = buckets.bucket_exists(db, "alpha")
+
+    del_ghost = buckets.bucket_delete(db, "ghost")
+    del_ghost_notfound = 0
+    if string.equals(del_ghost, buckets.ERR_BUCKET_NOT_FOUND) == 1 { del_ghost_notfound = 1 }
+
+    aeocha.describe(fw, "metadata.buckets") {
+        aeocha.it("create + exists") callback {
+            aeocha.assert_eq(fw, create_ok, 1, "created")
+            aeocha.assert_eq(fw, exists_alpha, 1, "alpha exists")
+            aeocha.assert_eq(fw, exists_ghost, 0, "ghost absent")
+        }
+        aeocha.it("get_owner") callback {
+            aeocha.assert_eq(fw, owner_match, 1, "owner matches")
+            aeocha.assert_eq(fw, missing_is_notfound, 1, "missing -> not found")
+        }
+        aeocha.it("list ordered by created_at") callback {
+            aeocha.assert_eq(fw, names_match, 1, "alpha then beta")
+        }
+        aeocha.it("delete") callback {
+            aeocha.assert_eq(fw, del_ok, 1, "deleted")
+            aeocha.assert_eq(fw, exists_after_del, 0, "gone")
+            aeocha.assert_eq(fw, del_ghost_notfound, 1, "delete ghost -> not found")
+        }
+    }
+
+    aeocha.run_summary(fw)
+}

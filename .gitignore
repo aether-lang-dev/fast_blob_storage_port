@@ -102,3 +102,4 @@ crash.log
 agents
 .codex
 /server
+.ae_test_lib/

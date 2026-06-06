@@ -1,0 +1,66 @@
+// internal.metadata.activity — object activity log (port of activity.go).
+// Optional fields (object_key, size, etag, actor_user_id) store NULL when
+// empty/zero. List supports optional bucket + action filters and a limit
+// (default 100), ordered created_at DESC, id DESC.
+
+import contrib.sqlite
+import std.string
+
+exports (activity_create, activity_count, activity_list_actions)
+
+const INSERT_SQL = "INSERT INTO object_activity (id, action, bucket_name, object_key, size, etag, actor_user_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+
+// Record an activity. object_key/etag/actor_user_id "" -> NULL;
+// size 0 -> NULL. Returns "" or error.
+activity_create(db: ptr, id: string, action: string, bucket: string, object_key: string, size: int, etag: string, actor_user_id: string) -> string {
+    stmt, perr = sqlite.prepare(db, INSERT_SQL)
+    if perr != "" { return perr }
+    sqlite.bind_text(stmt, 1, id)
+    sqlite.bind_text(stmt, 2, action)
+    sqlite.bind_text(stmt, 3, bucket)
+    if string.length(object_key) == 0 { sqlite.bind_null(stmt, 4) }
+    else { sqlite.bind_text(stmt, 4, object_key) }
+    if size == 0 { sqlite.bind_null(stmt, 5) }
+    else { sqlite.bind_int(stmt, 5, size) }
+    if string.length(etag) == 0 { sqlite.bind_null(stmt, 6) }
+    else { sqlite.bind_text(stmt, 6, etag) }
+    if string.length(actor_user_id) == 0 { sqlite.bind_null(stmt, 7) }
+    else { sqlite.bind_text(stmt, 7, actor_user_id) }
+    rc, serr = sqlite.step(stmt, db)
+    sqlite.finalize(stmt)
+    return serr
+}
+
+// Count activity rows (optionally filtered by bucket; "" = all).
+activity_count(db: ptr, bucket: string) -> int {
+    stmt, perr = sqlite.prepare(db, "SELECT COUNT(*) FROM object_activity WHERE (?1 = '' OR bucket_name = ?1)")
+    if perr != "" { return -1 }
+    sqlite.bind_text(stmt, 1, bucket)
+    n = 0
+    if sqlite.next_row(stmt, db) == 1 { n = sqlite.column_int(stmt, 0) }
+    sqlite.finalize(stmt)
+    return n
+}
+
+// List actions (most recent first) as '\n'-joined action strings, with
+// optional bucket/action filters (pass "" to match all) and a limit
+// (<=0 -> 100). Used to assert ordering/filtering; full-row reads are
+// done by the management handler with its own column reads.
+activity_list_actions(db: ptr, bucket: string, action: string, limit: int) -> string {
+    lim = limit
+    if lim <= 0 { lim = 100 }
+    stmt, perr = sqlite.prepare(db, "SELECT action FROM object_activity WHERE (?1 = '' OR bucket_name = ?1) AND (?2 = '' OR action = ?2) ORDER BY created_at DESC, id DESC LIMIT ?3")
+    if perr != "" { return "" }
+    sqlite.bind_text(stmt, 1, bucket)
+    sqlite.bind_text(stmt, 2, action)
+    sqlite.bind_int(stmt, 3, lim)
+    out = ""
+    first = 1
+    while sqlite.next_row(stmt, db) == 1 {
+        a = string.copy(sqlite.column_text(stmt, 0))
+        if first == 1 { out = a  first = 0 }
+        else { out = string.concat(out, string.concat("\n", a)) }
+    }
+    sqlite.finalize(stmt)
+    return out
+}

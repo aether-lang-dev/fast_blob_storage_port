@@ -1,0 +1,158 @@
+// internal.metadata.users — user repository (port of user.go).
+//
+// Users carry bearer creds (access_key_id + secret_hash) and optional
+// SigV4 creds (sigv4_access_key_id + sigv4_secret_key, stored NULL when
+// empty). is_active is an INTEGER 0/1. Lookups return fields positionally.
+//
+// SECURITY: get_by_access_key / get_by_id / list clear sigv4_secret_key;
+// only get_by_sigv4_access_key (the SigV4 authenticator's sole caller)
+// returns it. We mirror that by having get_for_auth() return the secret
+// and the other getters omit it.
+
+import contrib.sqlite
+import std.string
+
+exports (
+    ERR_USER_NOT_FOUND, ERR_USERS_ALREADY_EXIST,
+    user_insert, user_count, user_create_first,
+    user_get_by_access_key, user_get_secret_hash,
+    user_get_sigv4_for_auth, user_get_role, user_delete, user_set_active
+)
+
+const ERR_USER_NOT_FOUND      = "user not found"
+const ERR_USERS_ALREADY_EXIST = "users already exist"
+
+const INSERT_SQL = "INSERT INTO users (id, display_name, access_key_id, secret_hash, sigv4_access_key_id, sigv4_secret_key, role, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, COALESCE(NULLIF(?9,''), CURRENT_TIMESTAMP), COALESCE(NULLIF(?10,''), CURRENT_TIMESTAMP))"
+
+// Insert a user. sigv4_access_key/sigv4_secret: pass "" to store NULL.
+// is_active: 1 or 0. Returns "" or error.
+user_insert(db: ptr, id: string, display_name: string, access_key_id: string, secret_hash: string, sigv4_access_key: string, sigv4_secret: string, role: string, is_active: int, created_at: string, updated_at: string) -> string {
+    stmt, perr = sqlite.prepare(db, INSERT_SQL)
+    if perr != "" { return perr }
+    sqlite.bind_text(stmt, 1, id)
+    sqlite.bind_text(stmt, 2, display_name)
+    sqlite.bind_text(stmt, 3, access_key_id)
+    sqlite.bind_text(stmt, 4, secret_hash)
+    if string.length(sigv4_access_key) == 0 { sqlite.bind_null(stmt, 5) }
+    else { sqlite.bind_text(stmt, 5, sigv4_access_key) }
+    if string.length(sigv4_secret) == 0 { sqlite.bind_null(stmt, 6) }
+    else { sqlite.bind_text(stmt, 6, sigv4_secret) }
+    sqlite.bind_text(stmt, 7, role)
+    sqlite.bind_int(stmt, 8, is_active)
+    sqlite.bind_text(stmt, 9, created_at)
+    sqlite.bind_text(stmt, 10, updated_at)
+    rc, serr = sqlite.step(stmt, db)
+    sqlite.finalize(stmt)
+    return serr
+}
+
+// Count users.
+user_count(db: ptr) -> int {
+    stmt, perr = sqlite.prepare(db, "SELECT COUNT(*) FROM users")
+    if perr != "" { return -1 }
+    n = -1
+    if sqlite.next_row(stmt, db) == 1 { n = sqlite.column_int(stmt, 0) }
+    sqlite.finalize(stmt)
+    return n
+}
+
+// Create the first admin only if no users exist (bootstrap). Returns ""
+// on success, ERR_USERS_ALREADY_EXIST if any user exists.
+user_create_first(db: ptr, id: string, display_name: string, access_key_id: string, secret_hash: string, sigv4_access_key: string, sigv4_secret: string) -> string {
+    if user_count(db) > 0 {
+        return ERR_USERS_ALREADY_EXIST
+    }
+    return user_insert(db, id, display_name, access_key_id, secret_hash, sigv4_access_key, sigv4_secret, "admin", 1, "", "")
+}
+
+// Look up by bearer access_key_id. Returns (id, role, is_active, "") or
+// ("", "", 0, ERR_USER_NOT_FOUND).
+user_get_by_access_key(db: ptr, access_key_id: string) -> {
+    stmt, perr = sqlite.prepare(db, "SELECT id, role, is_active FROM users WHERE access_key_id = ?1")
+    if perr != "" { return "", "", 0, perr }
+    sqlite.bind_text(stmt, 1, access_key_id)
+    if sqlite.next_row(stmt, db) != 1 {
+        sqlite.finalize(stmt)
+        return "", "", 0, ERR_USER_NOT_FOUND
+    }
+    id = string.copy(sqlite.column_text(stmt, 0))
+    role = string.copy(sqlite.column_text(stmt, 1))
+    active = sqlite.column_int(stmt, 2)
+    sqlite.finalize(stmt)
+    return id, role, active, ""
+}
+
+// Get a user's stored secret_hash by access_key_id (for bearer verify).
+// Returns (secret_hash, "") or ("", ERR_USER_NOT_FOUND).
+user_get_secret_hash(db: ptr, access_key_id: string) -> {
+    stmt, perr = sqlite.prepare(db, "SELECT secret_hash FROM users WHERE access_key_id = ?1")
+    if perr != "" { return "", perr }
+    sqlite.bind_text(stmt, 1, access_key_id)
+    if sqlite.next_row(stmt, db) != 1 {
+        sqlite.finalize(stmt)
+        return "", ERR_USER_NOT_FOUND
+    }
+    h = string.copy(sqlite.column_text(stmt, 0))
+    sqlite.finalize(stmt)
+    return h, ""
+}
+
+// SigV4 authenticator lookup. Returns (id, role, is_active, sigv4_secret_key, "")
+// or ("", "", 0, "", ERR_USER_NOT_FOUND). This is the ONLY getter that
+// exposes the SigV4 secret.
+user_get_sigv4_for_auth(db: ptr, sigv4_access_key_id: string) -> {
+    stmt, perr = sqlite.prepare(db, "SELECT id, role, is_active, sigv4_secret_key FROM users WHERE sigv4_access_key_id = ?1")
+    if perr != "" { return "", "", 0, "", perr }
+    sqlite.bind_text(stmt, 1, sigv4_access_key_id)
+    if sqlite.next_row(stmt, db) != 1 {
+        sqlite.finalize(stmt)
+        return "", "", 0, "", ERR_USER_NOT_FOUND
+    }
+    id = string.copy(sqlite.column_text(stmt, 0))
+    role = string.copy(sqlite.column_text(stmt, 1))
+    active = sqlite.column_int(stmt, 2)
+    secret = string.copy(sqlite.column_text(stmt, 3))
+    sqlite.finalize(stmt)
+    return id, role, active, secret, ""
+}
+
+// Get a user's role by id. Returns (role, "") or ("", ERR_USER_NOT_FOUND).
+user_get_role(db: ptr, id: string) -> {
+    stmt, perr = sqlite.prepare(db, "SELECT role FROM users WHERE id = ?1")
+    if perr != "" { return "", perr }
+    sqlite.bind_text(stmt, 1, id)
+    if sqlite.next_row(stmt, db) != 1 {
+        sqlite.finalize(stmt)
+        return "", ERR_USER_NOT_FOUND
+    }
+    r = string.copy(sqlite.column_text(stmt, 0))
+    sqlite.finalize(stmt)
+    return r, ""
+}
+
+// Delete a user. Returns "" or ERR_USER_NOT_FOUND.
+user_delete(db: ptr, id: string) -> string {
+    stmt, perr = sqlite.prepare(db, "DELETE FROM users WHERE id = ?1")
+    if perr != "" { return perr }
+    sqlite.bind_text(stmt, 1, id)
+    rc, serr = sqlite.step(stmt, db)
+    if serr != "" { sqlite.finalize(stmt) return serr }
+    affected = sqlite.changes(db)
+    sqlite.finalize(stmt)
+    if affected == 0 { return ERR_USER_NOT_FOUND }
+    return ""
+}
+
+// Set a user's is_active flag. Returns "" or ERR_USER_NOT_FOUND.
+user_set_active(db: ptr, id: string, active: int) -> string {
+    stmt, perr = sqlite.prepare(db, "UPDATE users SET is_active = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2")
+    if perr != "" { return perr }
+    sqlite.bind_int(stmt, 1, active)
+    sqlite.bind_text(stmt, 2, id)
+    rc, serr = sqlite.step(stmt, db)
+    if serr != "" { sqlite.finalize(stmt) return serr }
+    affected = sqlite.changes(db)
+    sqlite.finalize(stmt)
+    if affected == 0 { return ERR_USER_NOT_FOUND }
+    return ""
+}

@@ -1,0 +1,194 @@
+// internal.metadata.multipart — multipart upload repository (port of
+// multipart.go). Status lifecycle: active -> completing -> (deleted) or
+// aborted. The Go code used BEGIN IMMEDIATE transactions for claim /
+// add_part / complete to guard concurrent access; we mirror with
+// explicit BEGIN IMMEDIATE / COMMIT via sqlite.exec, since the contrib
+// veneer has no transaction wrapper.
+
+import contrib.sqlite
+import std.string
+
+exports (
+    ERR_MPU_NOT_FOUND, ERR_UPLOAD_ALREADY_CLAIMED,
+    STATUS_ACTIVE, STATUS_COMPLETING, STATUS_ABORTED,
+    mpu_create, mpu_get_status, mpu_delete, mpu_set_status, mpu_claim,
+    mpu_add_part, mpu_part_count, mpu_part_storage_paths,
+    mpu_list_all_ids
+)
+
+const ERR_MPU_NOT_FOUND        = "multipart upload not found"
+const ERR_UPLOAD_ALREADY_CLAIMED = "multipart upload already claimed"
+
+const STATUS_ACTIVE     = "active"
+const STATUS_COMPLETING = "completing"
+const STATUS_ABORTED    = "aborted"
+
+// Create a multipart upload (status defaults to active). content_type ""
+// -> octet-stream. Returns "" or error.
+mpu_create(db: ptr, id: string, bucket: string, key: string, content_type: string) -> string {
+    ct = content_type
+    if string.length(ct) == 0 { ct = "application/octet-stream" }
+    stmt, perr = sqlite.prepare(db, "INSERT INTO multipart_uploads (id, bucket_name, key, content_type, status) VALUES (?1, ?2, ?3, ?4, 'active')")
+    if perr != "" { return perr }
+    sqlite.bind_text(stmt, 1, id)
+    sqlite.bind_text(stmt, 2, bucket)
+    sqlite.bind_text(stmt, 3, key)
+    sqlite.bind_text(stmt, 4, ct)
+    rc, serr = sqlite.step(stmt, db)
+    sqlite.finalize(stmt)
+    return serr
+}
+
+// Get an upload's (bucket, key, content_type, status, err).
+mpu_get_status(db: ptr, id: string) -> {
+    stmt, perr = sqlite.prepare(db, "SELECT bucket_name, key, content_type, status FROM multipart_uploads WHERE id = ?1")
+    if perr != "" { return "", "", "", "", perr }
+    sqlite.bind_text(stmt, 1, id)
+    if sqlite.next_row(stmt, db) != 1 {
+        sqlite.finalize(stmt)
+        return "", "", "", "", ERR_MPU_NOT_FOUND
+    }
+    bucket = string.copy(sqlite.column_text(stmt, 0))
+    key = string.copy(sqlite.column_text(stmt, 1))
+    ct = string.copy(sqlite.column_text(stmt, 2))
+    status = string.copy(sqlite.column_text(stmt, 3))
+    sqlite.finalize(stmt)
+    return bucket, key, ct, status, ""
+}
+
+// Delete an upload (parts cascade). Returns "" or ERR_MPU_NOT_FOUND.
+mpu_delete(db: ptr, id: string) -> string {
+    stmt, perr = sqlite.prepare(db, "DELETE FROM multipart_uploads WHERE id = ?1")
+    if perr != "" { return perr }
+    sqlite.bind_text(stmt, 1, id)
+    rc, serr = sqlite.step(stmt, db)
+    if serr != "" { sqlite.finalize(stmt) return serr }
+    affected = sqlite.changes(db)
+    sqlite.finalize(stmt)
+    if affected == 0 { return ERR_MPU_NOT_FOUND }
+    return ""
+}
+
+// Unconditionally set status. Returns "" or ERR_MPU_NOT_FOUND.
+mpu_set_status(db: ptr, id: string, status: string) -> string {
+    stmt, perr = sqlite.prepare(db, "UPDATE multipart_uploads SET status = ?1, status_updated_at = CURRENT_TIMESTAMP WHERE id = ?2")
+    if perr != "" { return perr }
+    sqlite.bind_text(stmt, 1, status)
+    sqlite.bind_text(stmt, 2, id)
+    rc, serr = sqlite.step(stmt, db)
+    if serr != "" { sqlite.finalize(stmt) return serr }
+    affected = sqlite.changes(db)
+    sqlite.finalize(stmt)
+    if affected == 0 { return ERR_MPU_NOT_FOUND }
+    return ""
+}
+
+// Claim an active upload, transitioning it to `status` (e.g. completing).
+// Returns "" on success, ERR_MPU_NOT_FOUND, or ERR_UPLOAD_ALREADY_CLAIMED
+// if not currently active.
+mpu_claim(db: ptr, id: string, status: string) -> string {
+    sqlite.exec(db, "BEGIN IMMEDIATE")
+    cur, gerr = _current_status(db, id)
+    if gerr != "" {
+        sqlite.exec(db, "ROLLBACK")
+        return gerr
+    }
+    if string.equals(cur, STATUS_ACTIVE) == 0 {
+        sqlite.exec(db, "ROLLBACK")
+        return ERR_UPLOAD_ALREADY_CLAIMED
+    }
+    uerr = mpu_set_status(db, id, status)
+    if uerr != "" {
+        sqlite.exec(db, "ROLLBACK")
+        return uerr
+    }
+    sqlite.exec(db, "COMMIT")
+    return ""
+}
+
+_current_status(db: ptr, id: string) -> {
+    stmt, perr = sqlite.prepare(db, "SELECT status FROM multipart_uploads WHERE id = ?1")
+    if perr != "" { return "", perr }
+    sqlite.bind_text(stmt, 1, id)
+    if sqlite.next_row(stmt, db) != 1 {
+        sqlite.finalize(stmt)
+        return "", ERR_MPU_NOT_FOUND
+    }
+    s = string.copy(sqlite.column_text(stmt, 0))
+    sqlite.finalize(stmt)
+    return s, ""
+}
+
+// Add (or replace) a part. Returns (old_storage_path, "") where
+// old_storage_path is the previous part's path ("" if new), or
+// ("", err). Only valid while the upload is active.
+mpu_add_part(db: ptr, upload_id: string, part_number: int, size: int, etag: string, storage_path: string) -> {
+    cur, gerr = _current_status(db, upload_id)
+    if gerr != "" { return "", gerr }
+    if string.equals(cur, STATUS_ACTIVE) == 0 { return "", ERR_UPLOAD_ALREADY_CLAIMED }
+
+    old = ""
+    s1, perr1 = sqlite.prepare(db, "SELECT storage_path FROM multipart_parts WHERE upload_id = ?1 AND part_number = ?2")
+    if perr1 == "" {
+        sqlite.bind_text(s1, 1, upload_id)
+        sqlite.bind_int(s1, 2, part_number)
+        if sqlite.next_row(s1, db) == 1 {
+            old = string.copy(sqlite.column_text(s1, 0))
+        }
+        sqlite.finalize(s1)
+    }
+
+    s2, perr2 = sqlite.prepare(db, "INSERT INTO multipart_parts (upload_id, part_number, size, etag, storage_path) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(upload_id, part_number) DO UPDATE SET size=excluded.size, etag=excluded.etag, storage_path=excluded.storage_path, created_at=CURRENT_TIMESTAMP")
+    if perr2 != "" { return "", perr2 }
+    sqlite.bind_text(s2, 1, upload_id)
+    sqlite.bind_int(s2, 2, part_number)
+    sqlite.bind_int(s2, 3, size)
+    sqlite.bind_text(s2, 4, etag)
+    sqlite.bind_text(s2, 5, storage_path)
+    rc, serr = sqlite.step(s2, db)
+    sqlite.finalize(s2)
+    if serr != "" { return "", serr }
+    return old, ""
+}
+
+// Number of parts for an upload.
+mpu_part_count(db: ptr, upload_id: string) -> int {
+    stmt, perr = sqlite.prepare(db, "SELECT COUNT(*) FROM multipart_parts WHERE upload_id = ?1")
+    if perr != "" { return -1 }
+    sqlite.bind_text(stmt, 1, upload_id)
+    n = 0
+    if sqlite.next_row(stmt, db) == 1 { n = sqlite.column_int(stmt, 0) }
+    sqlite.finalize(stmt)
+    return n
+}
+
+// Ordered part storage paths joined by '\n' (ascending part_number).
+mpu_part_storage_paths(db: ptr, upload_id: string) -> string {
+    stmt, perr = sqlite.prepare(db, "SELECT storage_path FROM multipart_parts WHERE upload_id = ?1 ORDER BY part_number ASC")
+    if perr != "" { return "" }
+    sqlite.bind_text(stmt, 1, upload_id)
+    out = ""
+    first = 1
+    while sqlite.next_row(stmt, db) == 1 {
+        p = string.copy(sqlite.column_text(stmt, 0))
+        if first == 1 { out = p  first = 0 }
+        else { out = string.concat(out, string.concat("\n", p)) }
+    }
+    sqlite.finalize(stmt)
+    return out
+}
+
+// All upload IDs joined by '\n'.
+mpu_list_all_ids(db: ptr) -> string {
+    stmt, perr = sqlite.prepare(db, "SELECT id FROM multipart_uploads")
+    if perr != "" { return "" }
+    out = ""
+    first = 1
+    while sqlite.next_row(stmt, db) == 1 {
+        i = string.copy(sqlite.column_text(stmt, 0))
+        if first == 1 { out = i  first = 0 }
+        else { out = string.concat(out, string.concat("\n", i)) }
+    }
+    sqlite.finalize(stmt)
+    return out
+}

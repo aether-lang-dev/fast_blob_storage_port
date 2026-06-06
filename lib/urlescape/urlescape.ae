@@ -1,0 +1,64 @@
+// lib.urlescape — Go net/url PathEscape equivalent (path-segment mode).
+//
+// Aether stdlib has no URL codec. publicread.ObjectPath needs Go's
+// url.PathEscape to produce byte-identical signed paths, so we mirror
+// Go's encodePathSegment shouldEscape predicate exactly.
+//
+// Kept unescaped in path-segment mode (verified against Go 1.x):
+//   - unreserved: A-Z a-z 0-9 - _ . ~
+//   - sub-delims/path allowed: $ & + : = @
+// Everything else (space, / ; , ? # ! * ' ( ) % and all non-ASCII)
+// is percent-encoded as %XX uppercase hex.
+
+import std.string
+import std.bytes
+
+exports (path_escape)
+
+const HEX = "0123456789ABCDEF"
+
+// True if byte `c` may appear unescaped in a path segment.
+_unreserved(c: int) -> int {
+    if c >= 65 && c <= 90 { return 1 }   // A-Z
+    if c >= 97 && c <= 122 { return 1 }  // a-z
+    if c >= 48 && c <= 57 { return 1 }   // 0-9
+    // - _ . ~
+    if c == 45 { return 1 }
+    if c == 95 { return 1 }
+    if c == 46 { return 1 }
+    if c == 126 { return 1 }
+    // $ & + : = @
+    if c == 36 { return 1 }
+    if c == 38 { return 1 }
+    if c == 43 { return 1 }
+    if c == 58 { return 1 }
+    if c == 61 { return 1 }
+    if c == 64 { return 1 }
+    return 0
+}
+
+// Percent-encode a string per path-segment rules. Binary-safe: walks
+// the byte length, not strlen.
+path_escape(s: string) -> string {
+    n = string.length(s)
+    // worst case every byte expands to 3 chars
+    buf = bytes.new(n * 3)
+    out = 0
+    i = 0
+    while i < n {
+        c = string.char_at_n(s, n, i)
+        if _unreserved(c) == 1 {
+            bytes.set(buf, out, c)
+            out = out + 1
+        } else {
+            hi = c / 16
+            lo = c - hi * 16
+            bytes.set(buf, out, 37)                                   // '%'
+            bytes.set(buf, out + 1, string.char_at(HEX, hi))
+            bytes.set(buf, out + 2, string.char_at(HEX, lo))
+            out = out + 3
+        }
+        i = i + 1
+    }
+    return bytes.finish(buf, out)
+}

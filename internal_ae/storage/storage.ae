@@ -1,0 +1,395 @@
+// internal.storage — disk storage engine (Aether port of
+// internal/storage/*.go).
+//
+// Differences from Go:
+//  - The HTTP body is already buffered by the handler, so write/read
+//    take/return a binary string + explicit length instead of io.Reader
+//    / io.ReadCloser. write_atomic does the stage+fsync+rename the Go
+//    Write did by hand; read_binary returns (data, len, err).
+//  - Errors are Go-style strings. Stable sentinels are exported as
+//    ERR_NOT_FOUND / ERR_INVALID_KEY / ERR_PATH_TRAVERSAL so callers
+//    (and tests) can branch without parsing prose.
+//  - The engine is a struct carrying data_dir + tmp_dir.
+
+import std.string
+import std.fs
+import std.collections (*)
+import pathutil
+import uuid
+
+// Raw fs externs the qualified `fs.` wrappers don't expose. Declared
+// locally because `import std.fs (*)` mis-types the tuple-returning
+// wrappers; the wrappers are reached via `fs.<name>` and these bare
+// externs via the unqualified names below.
+extern path_dirname(path: string) -> string
+extern path_is_absolute(path: string) -> int
+extern dir_exists(path: string) -> int
+extern fs_path_exists(path: string) -> int
+extern file_delete_raw(path: string) -> int
+extern dir_list_count(list: ptr) -> int
+extern dir_list_get(list: ptr, index: int) -> string
+extern dir_list_free(list: ptr)
+
+exports (
+    ERR_NOT_FOUND, ERR_INVALID_KEY, ERR_PATH_TRAVERSAL,
+    new, validate_key, storage_path,
+    resolve_key_path, resolve_storage_path,
+    write, read, delete_object,
+    write_part, assemble_parts, delete_upload_parts
+)
+
+const ERR_NOT_FOUND      = "storage: file not found"
+const ERR_INVALID_KEY    = "storage: invalid object key"
+const ERR_PATH_TRAVERSAL = "storage: path traversal detected"
+
+const MAX_KEY_LEN = 1024
+
+// Create the engine, ensuring data_dir and data_dir/.tmp exist. The
+// "engine" is just the resolved data_dir string, threaded into the
+// other functions (tmp_dir is always data_dir/.tmp). Returns
+// (data_dir, "") or ("", err).
+new(data_dir: string) -> {
+    dir = string.trim(data_dir)
+    if string.length(dir) == 0 {
+        dir = "./data"
+    }
+    e1 = fs.mkdir_p(dir)
+    if e1 != "" {
+        return "", e1
+    }
+    tmp = pathutil.join(dir, ".tmp")
+    e2 = fs.mkdir_p(tmp)
+    if e2 != "" {
+        return "", e2
+    }
+    return dir, ""
+}
+
+// tmp dir for a data_dir.
+_tmp_dir(data_dir: string) -> string {
+    return pathutil.join(data_dir, ".tmp")
+}
+
+// --- key validation (security-critical; mirror Go ValidateKey) ---
+
+_contains_traversal_segment(key: string) -> int {
+    normalized = _replace_all(key, "\\", "/")
+    parts = string.split(normalized, "/")
+    n = string.array_size(parts)
+    found = 0
+    i = 0
+    while i < n {
+        if string.equals(string.array_get(parts, i), "..") == 1 {
+            found = 1
+        }
+        i = i + 1
+    }
+    string.array_free(parts)
+    return found
+}
+
+// Replace every occurrence of `from` with `to` (from is non-empty).
+_replace_all(s: string, from: string, to: string) -> string {
+    parts = string.split(s, from)
+    n = string.array_size(parts)
+    out = ""
+    i = 0
+    while i < n {
+        seg = string.array_get(parts, i)
+        if i == 0 {
+            out = string.copy(seg)
+        } else {
+            out = string.concat(out, string.concat(to, seg))
+        }
+        i = i + 1
+    }
+    string.array_free(parts)
+    return out
+}
+
+// Scan for a NUL (0), LF (10) or CR (13) byte. Length-aware: walks the
+// full byte count so an embedded NUL is detected (unlike string.contains
+// which strlen-bounds and stops at the first NUL).
+_has_control_byte(s: string) -> int {
+    n = string.length(s)
+    i = 0
+    while i < n {
+        c = string.char_at_n(s, n, i)
+        if c == 0 { return 1 }
+        if c == 10 { return 1 }
+        if c == 13 { return 1 }
+        i = i + 1
+    }
+    return 0
+}
+
+// Validate an object key. Returns "" if valid, else a sentinel error.
+validate_key(key: string) -> string {
+    if string.length(key) == 0 {
+        return ERR_INVALID_KEY
+    }
+    if string.length(key) > MAX_KEY_LEN {
+        return ERR_INVALID_KEY
+    }
+    if string.equals(key, ".") == 1 {
+        return ERR_INVALID_KEY
+    }
+    if string.equals(key, "..") == 1 {
+        return ERR_INVALID_KEY
+    }
+    if string.starts_with(key, "/") == 1 {
+        return ERR_INVALID_KEY
+    }
+    // Control-byte scan (length-aware): NUL/LF/CR. string.contains can't
+    // be used for NUL — it strlen-bounds the needle and would never match.
+    if _has_control_byte(key) == 1 {
+        return ERR_INVALID_KEY
+    }
+    if _contains_traversal_segment(key) == 1 {
+        return ERR_PATH_TRAVERSAL
+    }
+    cleaned = pathutil.clean(key)
+    if string.equals(cleaned, ".") == 1 {
+        return ERR_INVALID_KEY
+    }
+    if string.length(cleaned) == 0 {
+        return ERR_INVALID_KEY
+    }
+    return ""
+}
+
+// storage_path(bucket, key) = join(bucket, clean(key))
+storage_path(data_dir: string, bucket: string, key: string) -> string {
+    return pathutil.join(bucket, pathutil.clean(key))
+}
+
+// resolve_key_path: validate, compute storage path + absolute full path,
+// enforce within-base. Returns (storage_path, full_path, "") or
+// ("", "", err).
+resolve_key_path(data_dir: string, bucket: string, key: string) -> {
+    b = string.trim(bucket)
+    if string.length(b) == 0 {
+        return "", "", ERR_INVALID_KEY
+    }
+    verr = validate_key(key)
+    if verr != "" {
+        return "", "", verr
+    }
+    sp = storage_path(data_dir, b, key)
+    full = pathutil.join(data_dir, sp)
+    if pathutil.is_within_base(data_dir, full) == 0 {
+        return "", "", ERR_PATH_TRAVERSAL
+    }
+    return sp, full, ""
+}
+
+// resolve_storage_path: validate an existing storage path, returning the
+// absolute full path. Returns (full_path, "") or ("", err).
+resolve_storage_path(data_dir: string, sp: string) -> {
+    if string.length(string.trim(sp)) == 0 {
+        return "", ERR_INVALID_KEY
+    }
+    if path_is_absolute(sp) == 1 {
+        return "", ERR_INVALID_KEY
+    }
+    cleaned = pathutil.clean(sp)
+    full = pathutil.join(data_dir, cleaned)
+    if pathutil.is_within_base(data_dir, full) == 0 {
+        return "", ERR_PATH_TRAVERSAL
+    }
+    return full, ""
+}
+
+// --- write / read / delete ---
+
+// Write an object. Validates bucket/key, then writes the buffered body
+// to a UUID-named path under the bucket dir via write_atomic (the
+// metadata insert downstream is the real commit point). Returns
+// (storage_path, size, "") or ("", 0, err).
+write(data_dir: string, bucket: string, key: string, data: string, length: int) -> {
+    sp_check, full_check, rerr = resolve_key_path(data_dir, bucket, key)
+    if rerr != "" {
+        return "", 0, rerr
+    }
+    sp = pathutil.join(bucket, uuid.new_uuid())
+    full = pathutil.join(data_dir, sp)
+    if pathutil.is_within_base(data_dir, full) == 0 {
+        return "", 0, ERR_PATH_TRAVERSAL
+    }
+    // ensure the bucket dir exists
+    bucket_dir = path_dirname(full)
+    derr = fs.mkdir_p(bucket_dir)
+    if derr != "" {
+        return "", 0, derr
+    }
+    werr = fs.write_atomic(full, data, length)
+    if werr != "" {
+        return "", 0, werr
+    }
+    return sp, length, ""
+}
+
+// Read an object by storage path. Returns (data, length, "") or
+// ("", 0, err). Missing file -> ERR_NOT_FOUND.
+read(data_dir: string, sp: string) -> {
+    full, rerr = resolve_storage_path(data_dir, sp)
+    if rerr != "" {
+        return "", 0, rerr
+    }
+    if fs_path_exists(full) == 0 {
+        return "", 0, ERR_NOT_FOUND
+    }
+    data, length, err = fs.read_binary(full)
+    if err != "" {
+        return "", 0, err
+    }
+    return data, length, ""
+}
+
+// Delete an object by storage path. Missing file is not an error
+// (idempotent), matching Go. Returns "" or err.
+delete_object(data_dir: string, sp: string) -> string {
+    full, rerr = resolve_storage_path(data_dir, sp)
+    if rerr != "" {
+        return rerr
+    }
+    if fs_path_exists(full) == 0 {
+        return ""
+    }
+    if file_delete_raw(full) == 0 { return "storage: delete failed" }
+    return ""
+}
+
+// --- multipart ---
+
+_validate_upload_id(upload_id: string) -> string {
+    if string.length(string.trim(upload_id)) == 0 {
+        return ERR_INVALID_KEY
+    }
+    if string.contains(upload_id, "/") == 1 {
+        return ERR_INVALID_KEY
+    }
+    if string.contains(upload_id, "\\") == 1 {
+        return ERR_INVALID_KEY
+    }
+    if _has_control_byte(upload_id) == 1 {
+        return ERR_INVALID_KEY
+    }
+    if _contains_traversal_segment(upload_id) == 1 {
+        return ERR_PATH_TRAVERSAL
+    }
+    return ""
+}
+
+// Directory holding parts for an upload: data_dir/.tmp/multipart/<id>.
+_part_dir(data_dir: string, upload_id: string) -> string {
+    mp = pathutil.join(_tmp_dir(data_dir), "multipart")
+    return pathutil.join(mp, upload_id)
+}
+
+// Write one multipart part. Returns (storage_path, size, "") or
+// ("", 0, err). The part keeps a unique filename so concurrent uploads
+// of the same part number don't race.
+write_part(data_dir: string, upload_id: string, part_number: int, data: string, length: int) -> {
+    verr = _validate_upload_id(upload_id)
+    if verr != "" {
+        return "", 0, verr
+    }
+    part_dir = _part_dir(data_dir, upload_id)
+    derr = fs.mkdir_p(part_dir)
+    if derr != "" {
+        return "", 0, derr
+    }
+    pn = string.from_int(part_number)
+    fname = string.concat(pn, string.concat(".", uuid.new_hex(8)))
+    full = pathutil.join(part_dir, fname)
+    werr = fs.write_atomic(full, data, length)
+    if werr != "" {
+        return "", 0, werr
+    }
+    // storage path relative to data_dir
+    rel = pathutil.join(".tmp", "multipart")
+    rel = pathutil.join(rel, upload_id)
+    rel = pathutil.join(rel, fname)
+    return rel, length, ""
+}
+
+// Assemble ordered parts into a final object. part_paths is a DirList-
+// style *StringSeq? — here we take a std.collections string list ptr and
+// a count for simplicity. Returns (storage_path, total_size, "") or err.
+// Parts are concatenated in the given order.
+assemble_parts(data_dir: string, bucket: string, key: string, part_full_paths: ptr, count: int) -> {
+    verr = validate_key(key)
+    if verr != "" {
+        return "", 0, verr
+    }
+    sp = pathutil.join(bucket, uuid.new_uuid())
+    full = pathutil.join(data_dir, sp)
+    if pathutil.is_within_base(data_dir, full) == 0 {
+        return "", 0, ERR_PATH_TRAVERSAL
+    }
+    // Concatenate all parts into one buffer.
+    total = 0
+    combined = ""
+    i = 0
+    while i < count {
+        part_sp = string_list_get(part_full_paths, i)
+        pfull, perr = resolve_storage_path(data_dir, part_sp)
+        if perr != "" {
+            return "", 0, perr
+        }
+        pdata, plen, rerr = fs.read_binary(pfull)
+        if rerr != "" {
+            return "", 0, rerr
+        }
+        combined = string.concat(combined, pdata)
+        total = total + plen
+        i = i + 1
+    }
+    bucket_dir = path_dirname(full)
+    derr = fs.mkdir_p(bucket_dir)
+    if derr != "" {
+        return "", 0, derr
+    }
+    werr = fs.write_atomic(full, combined, total)
+    if werr != "" {
+        return "", 0, werr
+    }
+    return sp, total, ""
+}
+
+// Delete all parts for an upload. Returns "" or err.
+delete_upload_parts(data_dir: string, upload_id: string) -> string {
+    verr = _validate_upload_id(upload_id)
+    if verr != "" {
+        return verr
+    }
+    part_dir = _part_dir(data_dir, upload_id)
+    if dir_exists(part_dir) == 0 {
+        return ""
+    }
+    return _remove_tree(part_dir)
+}
+
+// Recursively remove a directory tree (files then dirs).
+_remove_tree(dir: string) -> string {
+    list, lerr = fs.list_dir(dir)
+    if lerr != "" {
+        // already gone or unreadable; try a plain rmdir
+        return fs.delete_dir(dir)
+    }
+    cnt = dir_list_count(list)
+    i = 0
+    while i < cnt {
+        name = dir_list_get(list, i)
+        child = pathutil.join(dir, name)
+        if dir_exists(child) == 1 {
+            _remove_tree(child)
+        } else {
+            file_delete_raw(child)
+        }
+        i = i + 1
+    }
+    dir_list_free(list)
+    return fs.delete_dir(dir)
+}

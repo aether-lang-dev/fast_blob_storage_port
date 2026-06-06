@@ -1,0 +1,44 @@
+import aeocha
+import pathutil
+main() {
+    fw = aeocha.init()
+    aeocha.describe(fw, "pathutil.clean") {
+        aeocha.it("collapses dotdot") callback {
+            aeocha.assert_str_eq(fw, pathutil.clean("a/../b/file.txt"), "b/file.txt", "1")
+        }
+        aeocha.it("plain") callback {
+            aeocha.assert_str_eq(fw, pathutil.clean("a/b/c.txt"), "a/b/c.txt", "2")
+        }
+        aeocha.it("dot prefix") callback {
+            aeocha.assert_str_eq(fw, pathutil.clean("./x"), "x", "3")
+        }
+        aeocha.it("double slash") callback {
+            aeocha.assert_str_eq(fw, pathutil.clean("a//b"), "a/b", "4")
+        }
+        aeocha.it("leading dotdot kept") callback {
+            aeocha.assert_str_eq(fw, pathutil.clean("../etc"), "../etc", "5")
+        }
+        aeocha.it("a/../../b") callback {
+            aeocha.assert_str_eq(fw, pathutil.clean("a/../../b"), "../b", "6")
+        }
+        aeocha.it("empty -> dot") callback {
+            aeocha.assert_str_eq(fw, pathutil.clean(""), ".", "7")
+        }
+        aeocha.it("a/b/../c") callback {
+            aeocha.assert_str_eq(fw, pathutil.clean("a/b/../c"), "a/c", "8")
+        }
+        aeocha.it("first_element") callback {
+            aeocha.assert_str_eq(fw, pathutil.first_element("docs/a/b.txt"), "docs", "fe")
+        }
+        aeocha.it("within base true") callback {
+            aeocha.assert_eq(fw, pathutil.is_within_base("/base", "/base/docs/a.txt"), 1, "in")
+        }
+        aeocha.it("within base false") callback {
+            aeocha.assert_eq(fw, pathutil.is_within_base("/base", "/outside.txt"), 0, "out")
+        }
+        aeocha.it("within base equal") callback {
+            aeocha.assert_eq(fw, pathutil.is_within_base("/base", "/base"), 1, "eq")
+        }
+    }
+    aeocha.run_summary(fw)
+}

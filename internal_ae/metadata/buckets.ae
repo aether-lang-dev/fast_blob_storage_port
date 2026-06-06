@@ -1,0 +1,125 @@
+// internal.metadata.buckets — bucket repository (port of bucket.go).
+// Uses contrib.sqlite prepared statements. Timestamps are stored/read
+// as TEXT; created_at defaults to CURRENT_TIMESTAMP when not supplied.
+//
+// A "bucket" is returned as a flat (name, owner_id, created_at) tuple to
+// avoid struct-in-tuple-return (unsupported). Callers that need the
+// fields take them positionally.
+
+import contrib.sqlite
+import std.string
+
+exports (
+    ERR_BUCKET_NOT_FOUND,
+    bucket_create, bucket_exists, bucket_get_owner, bucket_get_created,
+    bucket_delete, bucket_list_names, bucket_list_names_by_owner
+)
+
+const ERR_BUCKET_NOT_FOUND = "bucket not found"
+
+// Create a bucket. created_at: pass "" to use CURRENT_TIMESTAMP.
+// Returns "" on success, error text on failure.
+bucket_create(db: ptr, name: string, owner_id: string, created_at: string) -> string {
+    if string.length(created_at) == 0 {
+        stmt, perr = sqlite.prepare(db, "INSERT INTO buckets (name, owner_id) VALUES (?1, ?2)")
+        if perr != "" { return perr }
+        sqlite.bind_text(stmt, 1, name)
+        sqlite.bind_text(stmt, 2, owner_id)
+        rc, serr = sqlite.step(stmt, db)
+        sqlite.finalize(stmt)
+        return serr
+    }
+    stmt, perr = sqlite.prepare(db, "INSERT INTO buckets (name, owner_id, created_at) VALUES (?1, ?2, ?3)")
+    if perr != "" { return perr }
+    sqlite.bind_text(stmt, 1, name)
+    sqlite.bind_text(stmt, 2, owner_id)
+    sqlite.bind_text(stmt, 3, created_at)
+    rc, serr = sqlite.step(stmt, db)
+    sqlite.finalize(stmt)
+    return serr
+}
+
+// Returns 1 if a bucket with this name exists, 0 otherwise.
+bucket_exists(db: ptr, name: string) -> int {
+    stmt, perr = sqlite.prepare(db, "SELECT 1 FROM buckets WHERE name = ?1")
+    if perr != "" { return 0 }
+    sqlite.bind_text(stmt, 1, name)
+    found = 0
+    if sqlite.next_row(stmt, db) == 1 { found = 1 }
+    sqlite.finalize(stmt)
+    return found
+}
+
+// Get a bucket's owner_id. Returns (owner_id, "") or ("", ERR_BUCKET_NOT_FOUND).
+bucket_get_owner(db: ptr, name: string) -> {
+    stmt, perr = sqlite.prepare(db, "SELECT owner_id FROM buckets WHERE name = ?1")
+    if perr != "" { return "", perr }
+    sqlite.bind_text(stmt, 1, name)
+    if sqlite.next_row(stmt, db) != 1 {
+        sqlite.finalize(stmt)
+        return "", ERR_BUCKET_NOT_FOUND
+    }
+    owner = string.copy(sqlite.column_text(stmt, 0))
+    sqlite.finalize(stmt)
+    return owner, ""
+}
+
+// Get a bucket's created_at text. Returns (created_at, "") or ("", err).
+bucket_get_created(db: ptr, name: string) -> {
+    stmt, perr = sqlite.prepare(db, "SELECT created_at FROM buckets WHERE name = ?1")
+    if perr != "" { return "", perr }
+    sqlite.bind_text(stmt, 1, name)
+    if sqlite.next_row(stmt, db) != 1 {
+        sqlite.finalize(stmt)
+        return "", ERR_BUCKET_NOT_FOUND
+    }
+    c = string.copy(sqlite.column_text(stmt, 0))
+    sqlite.finalize(stmt)
+    return c, ""
+}
+
+// Delete a bucket. Returns "" on success, ERR_BUCKET_NOT_FOUND if absent.
+bucket_delete(db: ptr, name: string) -> string {
+    stmt, perr = sqlite.prepare(db, "DELETE FROM buckets WHERE name = ?1")
+    if perr != "" { return perr }
+    sqlite.bind_text(stmt, 1, name)
+    rc, serr = sqlite.step(stmt, db)
+    if serr != "" { sqlite.finalize(stmt) return serr }
+    affected = sqlite.changes(db)
+    sqlite.finalize(stmt)
+    if affected == 0 { return ERR_BUCKET_NOT_FOUND }
+    return ""
+}
+
+// List all bucket names ordered by created_at ASC, joined with '\n'.
+// (Returning a delimited string sidesteps cross-FFI list ownership;
+// caller splits on '\n'. Empty string = no buckets.)
+bucket_list_names(db: ptr) -> string {
+    stmt, perr = sqlite.prepare(db, "SELECT name FROM buckets ORDER BY created_at ASC, name ASC")
+    if perr != "" { return "" }
+    out = ""
+    first = 1
+    while sqlite.next_row(stmt, db) == 1 {
+        nm = string.copy(sqlite.column_text(stmt, 0))
+        if first == 1 { out = nm  first = 0 }
+        else { out = string.concat(out, string.concat("\n", nm)) }
+    }
+    sqlite.finalize(stmt)
+    return out
+}
+
+// List bucket names owned by owner_id, ordered by created_at ASC.
+bucket_list_names_by_owner(db: ptr, owner_id: string) -> string {
+    stmt, perr = sqlite.prepare(db, "SELECT name FROM buckets WHERE owner_id = ?1 ORDER BY created_at ASC, name ASC")
+    if perr != "" { return "" }
+    sqlite.bind_text(stmt, 1, owner_id)
+    out = ""
+    first = 1
+    while sqlite.next_row(stmt, db) == 1 {
+        nm = string.copy(sqlite.column_text(stmt, 0))
+        if first == 1 { out = nm  first = 0 }
+        else { out = string.concat(out, string.concat("\n", nm)) }
+    }
+    sqlite.finalize(stmt)
+    return out
+}

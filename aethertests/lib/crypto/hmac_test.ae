@@ -1,0 +1,46 @@
+import aeocha
+import std.string
+import hmac
+
+main() {
+    fw = aeocha.init()
+
+    aeocha.describe(fw, "hmac.sha256_hex (RFC 4231)") {
+
+        // Test Case 2: key="Jefe", data="what do ya want for nothing?"
+        aeocha.it("RFC 4231 case 2 (Jefe)") callback {
+            key = "Jefe"
+            msg = "what do ya want for nothing?"
+            got = hmac.sha256_hex(key, string.length(key), msg, string.length(msg))
+            want = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+            aeocha.assert_str_eq(fw, got, want, "case2")
+        }
+
+        // Empty key + empty message known vector:
+        // HMAC-SHA256("","") = b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad
+        aeocha.it("empty key and message") callback {
+            got = hmac.sha256_hex("", 0, "", 0)
+            want = "b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad"
+            aeocha.assert_str_eq(fw, got, want, "empty")
+        }
+
+        // Long key (> 64 bytes) path — RFC 4231 case 4 uses 0xaa*131 + numeric data.
+        // Simpler self-check: a 100-char key triggers the SHA256(key) branch.
+        // Vector: HMAC-SHA256(key=100*'a', msg="abc")
+        //   computed reference: see parity note. Use a string we can reproduce.
+        aeocha.it("long key (>64B) takes hash branch") callback {
+            key = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            msg = "abc"
+            got = hmac.sha256_hex(key, string.length(key), msg, string.length(msg))
+            want = "c661b9f4ae9d1a9e9bd6ad956d01d63f91809f83039431a3a362ab665652adfe"
+            aeocha.assert_str_eq(fw, got, want, "long key")
+        }
+
+        aeocha.it("equal_hex matches identical, rejects different") callback {
+            aeocha.assert_eq(fw, hmac.equal_hex("deadbeef", "deadbeef"), 1, "eq")
+            aeocha.assert_eq(fw, hmac.equal_hex("deadbeef", "deadbee0"), 0, "neq")
+        }
+    }
+
+    aeocha.run_summary(fw)
+}

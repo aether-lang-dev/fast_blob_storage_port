@@ -1,0 +1,86 @@
+// internal.metadata.schema — DDL for the SQLite metadata store.
+// Port of migrations/migration.go (migrations 1-7 collapsed into the
+// final schema; CREATE TABLE IF NOT EXISTS makes it idempotent, which
+// is all a fresh single-node store needs — the incremental ALTERs in
+// the Go migration history only mattered for upgrading existing DBs).
+
+import contrib.sqlite
+import std.string
+
+exports (apply_schema, open_db)
+
+// Pragmas matching store.go: WAL, busy_timeout, synchronous NORMAL,
+// foreign keys on.
+const PRAGMAS = "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;"
+
+const DDL_USERS = "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, access_key_id TEXT NOT NULL UNIQUE, secret_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin','member')), is_active INTEGER NOT NULL DEFAULT 1, sigv4_access_key_id TEXT, sigv4_secret_key TEXT, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);"
+
+const DDL_USERS_SIGV4_IDX = "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_sigv4_access_key_id ON users(sigv4_access_key_id);"
+
+const DDL_BUCKETS = "CREATE TABLE IF NOT EXISTS buckets (name TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id), created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);"
+
+const DDL_OBJECTS = "CREATE TABLE IF NOT EXISTS objects (id TEXT PRIMARY KEY, bucket_name TEXT NOT NULL REFERENCES buckets(name), key TEXT NOT NULL, size INTEGER NOT NULL, etag TEXT NOT NULL, content_type TEXT NOT NULL DEFAULT 'application/octet-stream', storage_path TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(bucket_name, key));"
+
+const DDL_OBJECTS_IDX = "CREATE INDEX IF NOT EXISTS idx_objects_bucket_prefix ON objects(bucket_name, key);"
+
+const DDL_MPU = "CREATE TABLE IF NOT EXISTS multipart_uploads (id TEXT PRIMARY KEY, bucket_name TEXT NOT NULL REFERENCES buckets(name), key TEXT NOT NULL, content_type TEXT NOT NULL DEFAULT 'application/octet-stream', status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completing','aborted')), created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, status_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);"
+
+const DDL_MPU_PARTS = "CREATE TABLE IF NOT EXISTS multipart_parts (upload_id TEXT NOT NULL REFERENCES multipart_uploads(id) ON DELETE CASCADE, part_number INTEGER NOT NULL, size INTEGER NOT NULL, etag TEXT NOT NULL, storage_path TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (upload_id, part_number));"
+
+const DDL_ACTIVITY = "CREATE TABLE IF NOT EXISTS object_activity (id TEXT PRIMARY KEY, action TEXT NOT NULL, bucket_name TEXT NOT NULL, object_key TEXT, size INTEGER, etag TEXT, actor_user_id TEXT, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);"
+
+const DDL_ACTIVITY_IDX1 = "CREATE INDEX IF NOT EXISTS idx_object_activity_created_at ON object_activity(created_at DESC, id DESC);"
+
+const DDL_ACTIVITY_IDX2 = "CREATE INDEX IF NOT EXISTS idx_object_activity_bucket ON object_activity(bucket_name, created_at DESC);"
+
+// Apply pragmas + all DDL to an open db. Returns "" or the first error.
+apply_schema(db: ptr) -> string {
+    stmts = string.split(PRAGMAS, ";")
+    np = string.array_size(stmts)
+    i = 0
+    while i < np {
+        s = string.trim(string.array_get(stmts, i))
+        if string.length(s) > 0 {
+            e = sqlite.exec(db, s)
+            if e != "" { string.array_free(stmts) return e }
+        }
+        i = i + 1
+    }
+    string.array_free(stmts)
+
+    e1 = sqlite.exec(db, DDL_USERS)
+    if e1 != "" { return e1 }
+    e2 = sqlite.exec(db, DDL_USERS_SIGV4_IDX)
+    if e2 != "" { return e2 }
+    e3 = sqlite.exec(db, DDL_BUCKETS)
+    if e3 != "" { return e3 }
+    e4 = sqlite.exec(db, DDL_OBJECTS)
+    if e4 != "" { return e4 }
+    e5 = sqlite.exec(db, DDL_OBJECTS_IDX)
+    if e5 != "" { return e5 }
+    e6 = sqlite.exec(db, DDL_MPU)
+    if e6 != "" { return e6 }
+    e7 = sqlite.exec(db, DDL_MPU_PARTS)
+    if e7 != "" { return e7 }
+    e8 = sqlite.exec(db, DDL_ACTIVITY)
+    if e8 != "" { return e8 }
+    e9 = sqlite.exec(db, DDL_ACTIVITY_IDX1)
+    if e9 != "" { return e9 }
+    e10 = sqlite.exec(db, DDL_ACTIVITY_IDX2)
+    if e10 != "" { return e10 }
+    return ""
+}
+
+// Open a db at path and apply the schema. Returns (db, "") or (null, err).
+open_db(path: string) -> {
+    db, err = sqlite.open(path)
+    if err != "" {
+        return null, err
+    }
+    serr = apply_schema(db)
+    if serr != "" {
+        sqlite.close(db)
+        return null, serr
+    }
+    return db, ""
+}

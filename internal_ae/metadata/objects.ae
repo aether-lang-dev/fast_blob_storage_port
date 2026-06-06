@@ -1,0 +1,142 @@
+// internal.metadata.objects — object repository (port of objects.go).
+//
+// Object fields are passed/returned positionally (no struct-in-tuple).
+// The split-accessor pattern is used for GetByKey: object_get() loads a
+// row into module-level TLS-style holders via a single prepared read,
+// returning the fields as a tuple. List returns a '\n'-joined key list
+// plus an is_truncated flag (the S3 lister re-fetches each object's
+// metadata as needed, matching how the Go handler walks the slice).
+
+import contrib.sqlite
+import std.string
+
+exports (
+    ERR_OBJECT_NOT_FOUND,
+    object_upsert, object_exists, object_get, object_delete,
+    object_delete_all_in_bucket, object_list_keys
+)
+
+const ERR_OBJECT_NOT_FOUND = "object not found"
+
+const UPSERT_SQL = "INSERT INTO objects (id, bucket_name, key, size, etag, content_type, storage_path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, COALESCE(NULLIF(?8,''), CURRENT_TIMESTAMP), COALESCE(NULLIF(?9,''), CURRENT_TIMESTAMP)) ON CONFLICT(bucket_name, key) DO UPDATE SET id=excluded.id, size=excluded.size, etag=excluded.etag, content_type=excluded.content_type, storage_path=excluded.storage_path, updated_at=excluded.updated_at"
+
+// Insert or update an object (S3 PUT overwrite semantics). size is the
+// object byte size. created_at/updated_at: pass "" for CURRENT_TIMESTAMP.
+// content_type "" -> 'application/octet-stream'. Returns "" or error.
+object_upsert(db: ptr, id: string, bucket: string, key: string, size: int, etag: string, content_type: string, storage_path: string, created_at: string, updated_at: string) -> string {
+    ct = content_type
+    if string.length(ct) == 0 { ct = "application/octet-stream" }
+    stmt, perr = sqlite.prepare(db, UPSERT_SQL)
+    if perr != "" { return perr }
+    sqlite.bind_text(stmt, 1, id)
+    sqlite.bind_text(stmt, 2, bucket)
+    sqlite.bind_text(stmt, 3, key)
+    sqlite.bind_int(stmt, 4, size)
+    sqlite.bind_text(stmt, 5, etag)
+    sqlite.bind_text(stmt, 6, ct)
+    sqlite.bind_text(stmt, 7, storage_path)
+    sqlite.bind_text(stmt, 8, created_at)
+    sqlite.bind_text(stmt, 9, updated_at)
+    rc, serr = sqlite.step(stmt, db)
+    sqlite.finalize(stmt)
+    return serr
+}
+
+// Returns 1 if (bucket,key) exists, 0 otherwise.
+object_exists(db: ptr, bucket: string, key: string) -> int {
+    stmt, perr = sqlite.prepare(db, "SELECT 1 FROM objects WHERE bucket_name = ?1 AND key = ?2")
+    if perr != "" { return 0 }
+    sqlite.bind_text(stmt, 1, bucket)
+    sqlite.bind_text(stmt, 2, key)
+    found = 0
+    if sqlite.next_row(stmt, db) == 1 { found = 1 }
+    sqlite.finalize(stmt)
+    return found
+}
+
+// Get an object's metadata. Returns
+// (id, size, etag, content_type, storage_path, created_at, updated_at, err).
+// On miss, err = ERR_OBJECT_NOT_FOUND and the rest are zero/"".
+object_get(db: ptr, bucket: string, key: string) -> {
+    stmt, perr = sqlite.prepare(db, "SELECT id, size, etag, content_type, storage_path, created_at, updated_at FROM objects WHERE bucket_name = ?1 AND key = ?2")
+    if perr != "" { return "", 0, "", "", "", "", "", perr }
+    sqlite.bind_text(stmt, 1, bucket)
+    sqlite.bind_text(stmt, 2, key)
+    if sqlite.next_row(stmt, db) != 1 {
+        sqlite.finalize(stmt)
+        return "", 0, "", "", "", "", "", ERR_OBJECT_NOT_FOUND
+    }
+    id = string.copy(sqlite.column_text(stmt, 0))
+    size = sqlite.column_int(stmt, 1)
+    etag = string.copy(sqlite.column_text(stmt, 2))
+    ct = string.copy(sqlite.column_text(stmt, 3))
+    sp = string.copy(sqlite.column_text(stmt, 4))
+    created = string.copy(sqlite.column_text(stmt, 5))
+    updated = string.copy(sqlite.column_text(stmt, 6))
+    sqlite.finalize(stmt)
+    return id, size, etag, ct, sp, created, updated, ""
+}
+
+// Delete an object. Returns "" or ERR_OBJECT_NOT_FOUND.
+object_delete(db: ptr, bucket: string, key: string) -> string {
+    stmt, perr = sqlite.prepare(db, "DELETE FROM objects WHERE bucket_name = ?1 AND key = ?2")
+    if perr != "" { return perr }
+    sqlite.bind_text(stmt, 1, bucket)
+    sqlite.bind_text(stmt, 2, key)
+    rc, serr = sqlite.step(stmt, db)
+    if serr != "" { sqlite.finalize(stmt) return serr }
+    affected = sqlite.changes(db)
+    sqlite.finalize(stmt)
+    if affected == 0 { return ERR_OBJECT_NOT_FOUND }
+    return ""
+}
+
+// Delete all objects in a bucket. Returns "" or error.
+object_delete_all_in_bucket(db: ptr, bucket: string) -> string {
+    stmt, perr = sqlite.prepare(db, "DELETE FROM objects WHERE bucket_name = ?1")
+    if perr != "" { return perr }
+    sqlite.bind_text(stmt, 1, bucket)
+    rc, serr = sqlite.step(stmt, db)
+    sqlite.finalize(stmt)
+    return serr
+}
+
+// List object keys with prefix + start_after pagination. Fetches
+// max_keys+1 to detect truncation. Returns (keys_joined_by_nl,
+// is_truncated). Keys ordered ASC. Empty string = no keys.
+// (Matches Go List: WHERE key > start_after AND substr(key,1,len(prefix))=prefix.)
+object_list_keys(db: ptr, bucket: string, prefix: string, start_after: string, max_keys: int) -> {
+    if max_keys <= 0 { return "", 0 }
+    fetch = max_keys + 1
+    sql = "SELECT key FROM objects WHERE bucket_name = ?1 AND key > ?2"
+    if string.length(prefix) > 0 {
+        sql = string.concat(sql, " AND substr(key, 1, length(?3)) = ?3 ORDER BY key ASC LIMIT ?4")
+    } else {
+        sql = string.concat(sql, " ORDER BY key ASC LIMIT ?3")
+    }
+    stmt, perr = sqlite.prepare(db, sql)
+    if perr != "" { return "", 0 }
+    sqlite.bind_text(stmt, 1, bucket)
+    sqlite.bind_text(stmt, 2, start_after)
+    if string.length(prefix) > 0 {
+        sqlite.bind_text(stmt, 3, prefix)
+        sqlite.bind_int(stmt, 4, fetch)
+    } else {
+        sqlite.bind_int(stmt, 3, fetch)
+    }
+    out = ""
+    count = 0
+    first = 1
+    while sqlite.next_row(stmt, db) == 1 {
+        if count < max_keys {
+            k = string.copy(sqlite.column_text(stmt, 0))
+            if first == 1 { out = k  first = 0 }
+            else { out = string.concat(out, string.concat("\n", k)) }
+        }
+        count = count + 1
+    }
+    sqlite.finalize(stmt)
+    truncated = 0
+    if count > max_keys { truncated = 1 }
+    return out, truncated
+}

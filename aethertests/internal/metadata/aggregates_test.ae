@@ -1,0 +1,55 @@
+import aeocha
+import schema
+import activity
+import management
+import contrib.sqlite
+import std.string
+
+main() {
+    fw = aeocha.init()
+    db, oerr = schema.open_db(":memory:")
+    sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role, is_active) VALUES ('u1','U','ak1','sh','admin',1)")
+    sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role, is_active) VALUES ('u2','V','ak2','sh','member',0)")
+    sqlite.exec(db, "INSERT INTO buckets (name, owner_id) VALUES ('b1','u1')")
+    sqlite.exec(db, "INSERT INTO buckets (name, owner_id) VALUES ('b2','u1')")
+    sqlite.exec(db, "INSERT INTO objects (id, bucket_name, key, size, etag, storage_path) VALUES ('o1','b1','k1',100,'e','b1/1')")
+    sqlite.exec(db, "INSERT INTO objects (id, bucket_name, key, size, etag, storage_path) VALUES ('o2','b1','k2',250,'e','b1/2')")
+
+    // activity
+    activity.activity_create(db, "a1", "create", "b1", "k1", 100, "e", "u1")
+    activity.activity_create(db, "a2", "delete", "b1", "k2", 0, "", "u1")
+    activity.activity_create(db, "a3", "create", "b2", "x", 5, "e", "u1")
+    act_total = activity.activity_count(db, "")
+    act_b1 = activity.activity_count(db, "b1")
+    create_only = activity.activity_list_actions(db, "", "create", 100)
+    create_filter_ok = 0
+    if string.equals(create_only, "create\ncreate") == 1 { create_filter_ok = 1 }
+
+    // metrics
+    bc, oc, ob, uc, auc = management.metrics(db)
+    metrics_ok = 0
+    if bc == 2 && oc == 2 && ob == 350 && uc == 2 && auc == 1 { metrics_ok = 1 }
+
+    // per-bucket
+    b1_count = management.bucket_object_count(db, "b1")
+    b1_bytes = management.bucket_total_bytes(db, "b1")
+    b2_count = management.bucket_object_count(db, "b2")
+
+    aeocha.describe(fw, "metadata.activity + management") {
+        aeocha.it("activity count + filter") callback {
+            aeocha.assert_eq(fw, act_total, 3, "three activities")
+            aeocha.assert_eq(fw, act_b1, 2, "two in b1")
+            aeocha.assert_eq(fw, create_filter_ok, 1, "two creates")
+        }
+        aeocha.it("aggregate metrics") callback {
+            aeocha.assert_eq(fw, metrics_ok, 1, "buckets=2 objects=2 bytes=350 users=2 active=1")
+        }
+        aeocha.it("per-bucket aggregates") callback {
+            aeocha.assert_eq(fw, b1_count, 2, "b1 has 2 objects")
+            aeocha.assert_eq(fw, b1_bytes, 350, "b1 has 350 bytes")
+            aeocha.assert_eq(fw, b2_count, 0, "b2 empty")
+        }
+    }
+
+    aeocha.run_summary(fw)
+}

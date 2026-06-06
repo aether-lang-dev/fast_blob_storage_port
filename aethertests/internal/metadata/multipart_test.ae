@@ -1,0 +1,79 @@
+import aeocha
+import schema
+import multipart
+import contrib.sqlite
+import std.string
+
+main() {
+    fw = aeocha.init()
+    db, oerr = schema.open_db(":memory:")
+    sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role) VALUES ('u','U','ak','sh','admin')")
+    sqlite.exec(db, "INSERT INTO buckets (name, owner_id) VALUES ('b','u')")
+
+    c1 = multipart.mpu_create(db, "up1", "b", "big.bin", "application/zip")
+    create_ok = 0
+    if c1 == "" { create_ok = 1 }
+
+    bk, key, ct, status, gerr = multipart.mpu_get_status(db, "up1")
+    status_ok = 0
+    if gerr == "" && string.equals(status, "active") == 1 && string.equals(key, "big.bin") == 1 { status_ok = 1 }
+
+    // add two parts
+    old1, ae1 = multipart.mpu_add_part(db, "up1", 1, 100, "etagp1", ".tmp/multipart/up1/p1")
+    old2, ae2 = multipart.mpu_add_part(db, "up1", 2, 200, "etagp2", ".tmp/multipart/up1/p2")
+    parts_ok = 0
+    if ae1 == "" && ae2 == "" && string.equals(old1, "") == 1 { parts_ok = 1 }
+
+    pc = multipart.mpu_part_count(db, "up1")
+    paths = multipart.mpu_part_storage_paths(db, "up1")
+    paths_ok = 0
+    if string.equals(paths, ".tmp/multipart/up1/p1\n.tmp/multipart/up1/p2") == 1 { paths_ok = 1 }
+
+    // re-add part 1 returns its old path
+    old1b, ae1b = multipart.mpu_add_part(db, "up1", 1, 150, "etagp1b", ".tmp/multipart/up1/p1b")
+    replace_ok = 0
+    if string.equals(old1b, ".tmp/multipart/up1/p1") == 1 { replace_ok = 1 }
+
+    // claim: active -> completing
+    cl1 = multipart.mpu_claim(db, "up1", "completing")
+    claim_ok = 0
+    if cl1 == "" { claim_ok = 1 }
+
+    // second claim fails (no longer active)
+    cl2 = multipart.mpu_claim(db, "up1", "completing")
+    second_claim_blocked = 0
+    if string.equals(cl2, multipart.ERR_UPLOAD_ALREADY_CLAIMED) == 1 { second_claim_blocked = 1 }
+
+    // adding a part after claim fails (not active)
+    _, ae3 = multipart.mpu_add_part(db, "up1", 3, 50, "e", "x")
+    add_after_claim_blocked = 0
+    if string.equals(ae3, multipart.ERR_UPLOAD_ALREADY_CLAIMED) == 1 { add_after_claim_blocked = 1 }
+
+    // delete cascades parts
+    de = multipart.mpu_delete(db, "up1")
+    del_ok = 0
+    if de == "" && multipart.mpu_part_count(db, "up1") == 0 { del_ok = 1 }
+
+    aeocha.describe(fw, "metadata.multipart") {
+        aeocha.it("create + status") callback {
+            aeocha.assert_eq(fw, create_ok, 1, "created")
+            aeocha.assert_eq(fw, status_ok, 1, "active status")
+        }
+        aeocha.it("add parts") callback {
+            aeocha.assert_eq(fw, parts_ok, 1, "parts added")
+            aeocha.assert_eq(fw, pc, 2, "two parts")
+            aeocha.assert_eq(fw, paths_ok, 1, "ordered paths")
+            aeocha.assert_eq(fw, replace_ok, 1, "replace returns old path")
+        }
+        aeocha.it("claim lifecycle") callback {
+            aeocha.assert_eq(fw, claim_ok, 1, "claimed")
+            aeocha.assert_eq(fw, second_claim_blocked, 1, "second claim blocked")
+            aeocha.assert_eq(fw, add_after_claim_blocked, 1, "add after claim blocked")
+        }
+        aeocha.it("delete cascades parts") callback {
+            aeocha.assert_eq(fw, del_ok, 1, "deleted + parts gone")
+        }
+    }
+
+    aeocha.run_summary(fw)
+}

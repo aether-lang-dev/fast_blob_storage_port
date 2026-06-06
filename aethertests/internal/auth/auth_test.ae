@@ -1,0 +1,71 @@
+import aeocha
+import auth
+import std.string
+
+main() {
+    fw = aeocha.init()
+
+    // bearer
+    h = auth.hash_secret("mypassword")
+    vok = auth.verify_secret("mypassword", h)
+    vbad = auth.verify_secret("wrong", h)
+
+    ak, sec, berr = auth.split_bearer("AKIA123.secretpart")
+    bearer_split_ok = 0
+    if berr == "" && string.equals(ak, "AKIA123") == 1 && string.equals(sec, "secretpart") == 1 { bearer_split_ok = 1 }
+    _, _, berr2 = auth.split_bearer("nodot")
+    bearer_malformed = 0
+    if string.equals(berr2, auth.ERR_MALFORMED) == 1 { bearer_malformed = 1 }
+
+    // credential parse
+    cak, cdate, creg, csvc, cerr = auth.parse_credential("AKID/20260606/us-east-1/s3/aws4_request")
+    cred_ok = 0
+    if cerr == "" && string.equals(cak, "AKID") == 1 && string.equals(cdate, "20260606") == 1 && string.equals(creg, "us-east-1") == 1 { cred_ok = 1 }
+    _, _, _, _, cerr2 = auth.parse_credential("AKID/2026/us-east-1/iam/aws4_request")
+    cred_bad = 0
+    if string.equals(cerr2, auth.ERR_MALFORMED) == 1 { cred_bad = 1 }
+
+    // signed headers
+    sh_ok = auth.validate_signed_headers("host;x-amz-date")
+    sh_bad = auth.validate_signed_headers("x-amz-date;range")
+
+    // authorization header parse
+    hdr = "AWS4-HMAC-SHA256 Credential=AKID/20260606/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=deadbeef"
+    pcred, psigned, psig, perr = auth.parse_authorization_header(hdr)
+    authhdr_ok = 0
+    if perr == "" && string.equals(psig, "deadbeef") == 1 && string.equals(psigned, "host;x-amz-date") == 1 { authhdr_ok = 1 }
+
+    // end-to-end signature verification (parity with Go computeSignature)
+    chs = "host:localhost:9000\nx-amz-content-sha256:UNSIGNED-PAYLOAD\nx-amz-date:20260606T120000Z\n"
+    expected = "7e4af6ada3b3fbaf7b7c8e75a7165080c75c9786b3104219abab5346a35b6e8d"
+    sig_match = auth.verify_signature("testsecret", "20260606T120000Z", "AKID/20260606/us-east-1/s3/aws4_request", "20260606", "us-east-1", "s3", "GET", "/mybucket/key.txt", "", chs, "host;x-amz-content-sha256;x-amz-date", "UNSIGNED-PAYLOAD", expected)
+    sig_bad = auth.verify_signature("wrongsecret", "20260606T120000Z", "AKID/20260606/us-east-1/s3/aws4_request", "20260606", "us-east-1", "s3", "GET", "/mybucket/key.txt", "", chs, "host;x-amz-content-sha256;x-amz-date", "UNSIGNED-PAYLOAD", expected)
+
+    aeocha.describe(fw, "auth") {
+        aeocha.it("bearer hash + verify") callback {
+            aeocha.assert_eq(fw, vok, 1, "correct secret verifies")
+            aeocha.assert_eq(fw, vbad, 0, "wrong secret rejected")
+        }
+        aeocha.it("bearer split") callback {
+            aeocha.assert_eq(fw, bearer_split_ok, 1, "split ok")
+            aeocha.assert_eq(fw, bearer_malformed, 1, "no dot -> malformed")
+        }
+        aeocha.it("credential parse") callback {
+            aeocha.assert_eq(fw, cred_ok, 1, "valid credential")
+            aeocha.assert_eq(fw, cred_bad, 1, "short date rejected")
+        }
+        aeocha.it("signed headers require host") callback {
+            aeocha.assert_eq(fw, sh_ok, 1, "host present")
+            aeocha.assert_eq(fw, sh_bad, 0, "host absent")
+        }
+        aeocha.it("authorization header parse") callback {
+            aeocha.assert_eq(fw, authhdr_ok, 1, "parsed cred/signed/sig")
+        }
+        aeocha.it("end-to-end signature verify (Go parity)") callback {
+            aeocha.assert_eq(fw, sig_match, 1, "valid signature matches")
+            aeocha.assert_eq(fw, sig_bad, 0, "wrong secret fails")
+        }
+    }
+
+    aeocha.run_summary(fw)
+}

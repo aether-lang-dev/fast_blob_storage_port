@@ -1,0 +1,40 @@
+// internal.responses — JSON response helpers over the std.http server
+// response surface. Port of internal/responses/json.go.
+//
+// The Go version took an `any` payload and reflected it through
+// encoding/json. Aether has no reflective encoder, so callers build
+// the JSON string themselves (via std.json or hand-assembled) and pass
+// it in. write_json sets the standard Content-Type, applies an
+// optional no-store cache policy, sets the status, and writes the body.
+//
+// Cache policy is an int flag instead of Go's variadic options list:
+//   CACHE_DEFAULT (0) — no Cache-Control header added
+//   CACHE_NO_STORE (1) — Cache-Control: no-store + Pragma: no-cache
+// (WithNoStore was the only option used in the Go tree.)
+
+import std.http
+
+exports (CACHE_DEFAULT, CACHE_NO_STORE, write_json, with_no_store)
+
+const CACHE_DEFAULT  = 0
+const CACHE_NO_STORE = 1
+
+const CONTENT_TYPE_JSON = "application/json; charset=utf-8"
+
+// Apply the no-store cache headers (mirrors Go WithNoStore).
+with_no_store(res: ptr) {
+    http.response_set_header(res, "Cache-Control", "no-store")
+    http.response_set_header(res, "Pragma", "no-cache")
+}
+
+// Write a JSON response. `body` is a pre-encoded JSON string. `cache`
+// is CACHE_DEFAULT or CACHE_NO_STORE. Sets Content-Type, optional
+// cache headers, status, and body.
+write_json(res: ptr, status: int, body: string, cache: int) {
+    http.response_set_header(res, "Content-Type", CONTENT_TYPE_JSON)
+    if cache == CACHE_NO_STORE {
+        with_no_store(res)
+    }
+    http.response_set_status(res, status)
+    http.response_set_body(res, body)
+}

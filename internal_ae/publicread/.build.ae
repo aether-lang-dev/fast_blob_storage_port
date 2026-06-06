@@ -1,0 +1,17 @@
+// aeb build node for the publicread signer module (Aether port).
+// Depends on the lib/crypto/hmac and lib/urlescape modules.
+//
+// NOTE: this module is a library (imported by s3/management/setup once
+// those are ported), not a standalone program. Until the importing
+// packages exist, the gate is the aeocha suite in
+// aethertests/internal/publicread/ (run via scripts/aetest.sh).
+
+import build
+import aether
+
+main() {
+    b = build.start()
+    aether.program(b) {
+        source("signer.ae")
+    }
+}

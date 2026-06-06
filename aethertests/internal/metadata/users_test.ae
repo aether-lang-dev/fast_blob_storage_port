@@ -1,0 +1,75 @@
+import aeocha
+import schema
+import users
+import std.string
+
+main() {
+    fw = aeocha.init()
+    db, oerr = schema.open_db(":memory:")
+
+    // bootstrap first admin
+    c1 = users.user_create_first(db, "u1", "Admin", "AKIA1", "hash1", "SIGV4KEY1", "sigsecret1")
+    first_ok = 0
+    if c1 == "" { first_ok = 1 }
+
+    // second create_first must fail
+    c2 = users.user_create_first(db, "u2", "Other", "AKIA2", "hash2", "", "")
+    second_blocked = 0
+    if string.equals(c2, users.ERR_USERS_ALREADY_EXIST) == 1 { second_blocked = 1 }
+
+    cnt = users.user_count(db)
+
+    // lookups
+    id, role, active, gerr = users.user_get_by_access_key(db, "AKIA1")
+    bearer_ok = 0
+    if gerr == "" && string.equals(id, "u1") == 1 && string.equals(role, "admin") == 1 && active == 1 { bearer_ok = 1 }
+
+    hash, herr = users.user_get_secret_hash(db, "AKIA1")
+    hash_ok = 0
+    if herr == "" && string.equals(hash, "hash1") == 1 { hash_ok = 1 }
+
+    // sigv4 lookup returns the secret
+    sid, srole, sactive, ssecret, serr = users.user_get_sigv4_for_auth(db, "SIGV4KEY1")
+    sig_ok = 0
+    if serr == "" && string.equals(sid, "u1") == 1 && string.equals(ssecret, "sigsecret1") == 1 { sig_ok = 1 }
+
+    // missing lookup
+    _, _, _, merr = users.user_get_by_access_key(db, "NOPE")
+    miss_ok = 0
+    if string.equals(merr, users.ERR_USER_NOT_FOUND) == 1 { miss_ok = 1 }
+
+    // set inactive
+    users.user_set_active(db, "u1", 0)
+    _, _, active2, _ = users.user_get_by_access_key(db, "AKIA1")
+    deactivate_ok = 0
+    if active2 == 0 { deactivate_ok = 1 }
+
+    // delete
+    derr = users.user_delete(db, "u1")
+    del_ok = 0
+    if derr == "" && users.user_count(db) == 0 { del_ok = 1 }
+
+    aeocha.describe(fw, "metadata.users") {
+        aeocha.it("bootstrap first admin, blocks second") callback {
+            aeocha.assert_eq(fw, first_ok, 1, "first created")
+            aeocha.assert_eq(fw, second_blocked, 1, "second blocked")
+            aeocha.assert_eq(fw, cnt, 1, "one user")
+        }
+        aeocha.it("bearer lookup + secret hash") callback {
+            aeocha.assert_eq(fw, bearer_ok, 1, "bearer fields")
+            aeocha.assert_eq(fw, hash_ok, 1, "secret hash")
+        }
+        aeocha.it("sigv4 auth lookup exposes secret") callback {
+            aeocha.assert_eq(fw, sig_ok, 1, "sigv4 secret returned")
+        }
+        aeocha.it("missing user") callback {
+            aeocha.assert_eq(fw, miss_ok, 1, "not found")
+        }
+        aeocha.it("set_active + delete") callback {
+            aeocha.assert_eq(fw, deactivate_ok, 1, "deactivated")
+            aeocha.assert_eq(fw, del_ok, 1, "deleted")
+        }
+    }
+
+    aeocha.run_summary(fw)
+}

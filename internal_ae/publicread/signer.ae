@@ -1,0 +1,98 @@
+// internal.publicread — HMAC-SHA256 signing for /public/{bucket}/{key}
+// signed read URLs. Port of internal/publicread/signer.go.
+//
+// The Go Signer carried a `secret []byte` + injectable `now func()`.
+// Aether has no closures-over-clock seam here, so the current time is
+// passed in as a Unix-seconds `long` to verify(). The secret is a
+// string held by the caller and threaded into each call.
+//
+// Error model: Go sentinel errors become stable error strings:
+//   ""           -> ok
+//   "disabled"   -> secret missing / too short (signing disabled)
+//   "malformed"  -> expires not an int, or signature not 64 hex chars
+//   "expired"    -> now >= expires
+//   "invalid"    -> signature mismatch
+
+import std.string
+import hmac
+import urlescape
+
+exports (
+    ERR_DISABLED, ERR_MALFORMED, ERR_EXPIRED, ERR_INVALID,
+    new_secret, sign_path, verify, object_path, canonical_string
+)
+
+const ERR_DISABLED  = "disabled"
+const ERR_MALFORMED = "malformed"
+const ERR_EXPIRED   = "expired"
+const ERR_INVALID   = "invalid"
+
+const MIN_SECRET_LEN = 32
+
+// Validate a signing secret. Mirrors Go NewSigner: trimmed, non-empty,
+// at least 32 bytes. Returns (secret, "") on success or ("", err).
+new_secret(secret: string) -> {
+    trimmed = string.trim(secret)
+    if string.length(trimmed) < MIN_SECRET_LEN {
+        return "", ERR_DISABLED
+    }
+    return trimmed, ""
+}
+
+// canonicalString(path, expiresUnix) = "GET\n" + path + "\n" + expires
+canonical_string(path: string, expires_unix: long) -> string {
+    nl = string.from_char(10)
+    e = string.from_long(expires_unix)
+    return string.concat("GET", string.concat(nl, string.concat(path, string.concat(nl, e))))
+}
+
+// SignPath: HMAC-SHA256(secret, canonical) as lowercase hex.
+sign_path(secret: string, path: string, expires_unix: long) -> string {
+    canon = canonical_string(path, expires_unix)
+    return hmac.sha256_hex(secret, string.length(secret), canon, string.length(canon))
+}
+
+// Verify a signature. `now_unix` is the current time in Unix seconds
+// (caller supplies it — matches Go's injectable now()). Returns "" if
+// valid, else one of the ERR_* strings.
+verify(secret: string, path: string, expires_str: string, signature_hex: string, now_unix: long) -> string {
+    expires, perr = string.to_long(string.trim(expires_str))
+    if perr != "" {
+        return ERR_MALFORMED
+    }
+    // expired when now is NOT before expires, i.e. now >= expires
+    if now_unix >= expires {
+        return ERR_EXPIRED
+    }
+    sig = string.trim(signature_hex)
+    if string.length(sig) != 64 {
+        return ERR_MALFORMED
+    }
+    want = sign_path(secret, path, expires)
+    if hmac.equal_hex(sig, want) != 1 {
+        return ERR_INVALID
+    }
+    return ""
+}
+
+// ObjectPath: "/public/" + escape(bucket) + "/" + escape-each-segment(key).
+// Slashes in the key are preserved (segments escaped individually),
+// matching Go's split-on-"/" + url.PathEscape per segment.
+object_path(bucket: string, key: string) -> string {
+    out = string.concat("/public/", urlescape.path_escape(bucket))
+    out = string.concat(out, "/")
+
+    segs = string.split(key, "/")
+    n = string.array_size(segs)
+    i = 0
+    while i < n {
+        seg = string.array_get(segs, i)
+        out = string.concat(out, urlescape.path_escape(seg))
+        if i < n - 1 {
+            out = string.concat(out, "/")
+        }
+        i = i + 1
+    }
+    string.array_free(segs)
+    return out
+}

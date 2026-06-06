@@ -1,0 +1,186 @@
+// internal.auth — authentication core (port of internal/auth/*.go).
+//
+// The HTTP-shaped authenticator (reading an http request ptr) is wired
+// in the handler layer; this module holds the pure, testable logic:
+//  - bearer secret hashing/verify (sha256)
+//  - SigV4 credential/header parsing + canonical request assembly +
+//    signature verification (delegating the crypto chain to lib sigv4)
+//
+// Errors are stable strings. Principal is returned positionally as
+// (user_id, role, "") on success; ("","",err) on failure.
+
+import std.string
+import std.cryptography
+import hmac
+import sigv4
+
+exports (
+    ERR_NOT_APPLICABLE, ERR_MALFORMED, ERR_INVALID_CREDS, ERR_INACTIVE,
+    hash_secret, verify_secret,
+    split_bearer,
+    parse_credential, validate_signed_headers, parse_authorization_header,
+    canonical_request, verify_signature
+)
+
+const ERR_NOT_APPLICABLE = "auth: not applicable"
+const ERR_MALFORMED      = "auth: malformed token"
+const ERR_INVALID_CREDS  = "auth: invalid credentials"
+const ERR_INACTIVE       = "auth: user is inactive"
+
+// --- bearer ---
+
+// sha256 hex of the secret (the stored secret_hash form).
+hash_secret(secret: string) -> string {
+    h, e = cryptography.sha256_hex(secret, string.length(secret))
+    return h
+}
+
+// Constant-time-ish compare of sha256(secret) against stored hex.
+// Returns 1 if matching, 0 otherwise.
+verify_secret(secret: string, stored_hex: string) -> int {
+    return hmac.equal_hex(hash_secret(secret), stored_hex)
+}
+
+// Split a bearer token "accessKeyID.secret" into (access_key, secret, err).
+// err = ERR_MALFORMED if no '.' or either side empty.
+split_bearer(token: string) -> {
+    dot = string.index_of(token, ".")
+    if dot < 0 {
+        return "", "", ERR_MALFORMED
+    }
+    ak = string.substring(token, 0, dot)
+    sec = string.substring(token, dot + 1, string.length(token))
+    if string.length(ak) == 0 {
+        return "", "", ERR_MALFORMED
+    }
+    if string.length(sec) == 0 {
+        return "", "", ERR_MALFORMED
+    }
+    return ak, sec, ""
+}
+
+// --- SigV4 parsing ---
+
+// Parse "AKID/YYYYMMDD/region/s3/aws4_request" into
+// (access_key, date, region, service, err). Validates 8-digit date and
+// service=s3 and aws4_request terminator (matching Go parseCredential).
+parse_credential(credential: string) -> {
+    parts = string.split(credential, "/")
+    n = string.array_size(parts)
+    if n != 5 {
+        string.array_free(parts)
+        return "", "", "", "", ERR_MALFORMED
+    }
+    ak = string.copy(string.array_get(parts, 0))
+    date = string.copy(string.array_get(parts, 1))
+    region = string.copy(string.array_get(parts, 2))
+    service = string.copy(string.array_get(parts, 3))
+    term = string.copy(string.array_get(parts, 4))
+    string.array_free(parts)
+
+    if string.equals(term, "aws4_request") == 0 {
+        return "", "", "", "", ERR_MALFORMED
+    }
+    if string.length(ak) == 0 {
+        return "", "", "", "", ERR_MALFORMED
+    }
+    if string.length(date) != 8 {
+        return "", "", "", "", ERR_MALFORMED
+    }
+    if _all_digits(date) == 0 {
+        return "", "", "", "", ERR_MALFORMED
+    }
+    if string.length(region) == 0 {
+        return "", "", "", "", ERR_MALFORMED
+    }
+    if string.equals(service, "s3") == 0 {
+        return "", "", "", "", ERR_MALFORMED
+    }
+    return ak, date, region, service, ""
+}
+
+_all_digits(s: string) -> int {
+    n = string.length(s)
+    i = 0
+    while i < n {
+        c = string.char_at_n(s, n, i)
+        if c < 48 { return 0 }
+        if c > 57 { return 0 }
+        i = i + 1
+    }
+    return 1
+}
+
+// Signed headers must include "host". Returns 1 if valid, 0 otherwise.
+validate_signed_headers(signed_h: string) -> int {
+    parts = string.split(signed_h, ";")
+    n = string.array_size(parts)
+    found = 0
+    i = 0
+    while i < n {
+        if string.equals(string.array_get(parts, i), "host") == 1 { found = 1 }
+        i = i + 1
+    }
+    string.array_free(parts)
+    return found
+}
+
+// Parse an "AWS4-HMAC-SHA256 Credential=.., SignedHeaders=.., Signature=.."
+// header into (credential, signed_headers, signature, err).
+parse_authorization_header(header: string) -> {
+    prefix = "AWS4-HMAC-SHA256 "
+    if string.starts_with(header, prefix) == 0 {
+        return "", "", "", ERR_MALFORMED
+    }
+    rest = string.substring(header, string.length(prefix), string.length(header))
+    parts = string.split(rest, ",")
+    n = string.array_size(parts)
+    credential = ""
+    signed_h = ""
+    signature = ""
+    i = 0
+    while i < n {
+        kv = string.trim(string.array_get(parts, i))
+        eq = string.index_of(kv, "=")
+        if eq >= 0 {
+            k = string.substring(kv, 0, eq)
+            v = string.substring(kv, eq + 1, string.length(kv))
+            if string.equals(k, "Credential") == 1 { credential = string.copy(v) }
+            if string.equals(k, "SignedHeaders") == 1 { signed_h = string.copy(v) }
+            if string.equals(k, "Signature") == 1 { signature = string.copy(v) }
+        }
+        i = i + 1
+    }
+    string.array_free(parts)
+    if string.length(credential) == 0 { return "", "", "", ERR_MALFORMED }
+    if string.length(signed_h) == 0 { return "", "", "", ERR_MALFORMED }
+    if string.length(signature) == 0 { return "", "", "", ERR_MALFORMED }
+    return credential, signed_h, signature, ""
+}
+
+// Build the SigV4 canonical request from already-extracted components.
+// `canonical_headers` is the pre-assembled "h:v\n..." block and
+// `signed_headers_str` the ";"-joined list. `canonical_query` is the
+// pre-sorted/encoded query string ("" if none). payload_hash is the
+// X-Amz-Content-SHA256 value or "UNSIGNED-PAYLOAD".
+canonical_request(method: string, uri: string, canonical_query: string, canonical_headers: string, signed_headers_str: string, payload_hash: string) -> string {
+    nl = string.from_char(10)
+    u = uri
+    if string.length(u) == 0 { u = "/" }
+    out = method
+    out = string.concat(out, string.concat(nl, u))
+    out = string.concat(out, string.concat(nl, canonical_query))
+    out = string.concat(out, string.concat(nl, canonical_headers))
+    out = string.concat(out, string.concat(nl, signed_headers_str))
+    out = string.concat(out, string.concat(nl, payload_hash))
+    return out
+}
+
+// Verify a SigV4 signature end-to-end given the secret key and all the
+// request components. Returns 1 if the provided signature matches, else 0.
+verify_signature(secret_key: string, amz_date: string, credential: string, date: string, region: string, service: string, method: string, uri: string, canonical_query: string, canonical_headers: string, signed_headers_str: string, payload_hash: string, provided_sig: string) -> int {
+    cr = canonical_request(method, uri, canonical_query, canonical_headers, signed_headers_str, payload_hash)
+    sts = sigv4.string_to_sign(amz_date, credential, cr)
+    expected = sigv4.compute_signature(secret_key, date, region, service, sts)
+    return hmac.equal_hex(provided_sig, expected)
+}

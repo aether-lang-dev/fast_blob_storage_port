@@ -1,0 +1,50 @@
+// internal.metadata.management — aggregate metrics + bucket summaries
+// (port of management.go). Pure SELECT aggregations.
+
+import contrib.sqlite
+import std.string
+
+exports (metrics, bucket_object_count, bucket_total_bytes)
+
+// Aggregate store metrics. Returns
+// (bucket_count, object_count, total_object_bytes, user_count, active_user_count).
+metrics(db: ptr) -> {
+    bc = _scalar(db, "SELECT COUNT(*) FROM buckets")
+    oc = _scalar(db, "SELECT COUNT(*) FROM objects")
+    ob = _scalar(db, "SELECT COALESCE(SUM(size), 0) FROM objects")
+    uc = _scalar(db, "SELECT COUNT(*) FROM users")
+    auc = _scalar(db, "SELECT COALESCE(SUM(CASE WHEN is_active != 0 THEN 1 ELSE 0 END), 0) FROM users")
+    return bc, oc, ob, uc, auc
+}
+
+// Object count for one bucket.
+bucket_object_count(db: ptr, bucket: string) -> int {
+    stmt, perr = sqlite.prepare(db, "SELECT COUNT(*) FROM objects WHERE bucket_name = ?1")
+    if perr != "" { return -1 }
+    sqlite.bind_text(stmt, 1, bucket)
+    n = 0
+    if sqlite.next_row(stmt, db) == 1 { n = sqlite.column_int(stmt, 0) }
+    sqlite.finalize(stmt)
+    return n
+}
+
+// Total object bytes for one bucket.
+bucket_total_bytes(db: ptr, bucket: string) -> int {
+    stmt, perr = sqlite.prepare(db, "SELECT COALESCE(SUM(size), 0) FROM objects WHERE bucket_name = ?1")
+    if perr != "" { return -1 }
+    sqlite.bind_text(stmt, 1, bucket)
+    n = 0
+    if sqlite.next_row(stmt, db) == 1 { n = sqlite.column_int(stmt, 0) }
+    sqlite.finalize(stmt)
+    return n
+}
+
+// Run a single-int-cell SELECT and return the int (0 on error).
+_scalar(db: ptr, sql: string) -> int {
+    stmt, perr = sqlite.prepare(db, sql)
+    if perr != "" { return 0 }
+    n = 0
+    if sqlite.next_row(stmt, db) == 1 { n = sqlite.column_int(stmt, 0) }
+    sqlite.finalize(stmt)
+    return n
+}

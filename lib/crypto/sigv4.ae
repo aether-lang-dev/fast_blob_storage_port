@@ -1,0 +1,52 @@
+// lib.crypto.sigv4 — AWS Signature V4 signing primitives. Port of the
+// crypto core of internal/auth/sigv4.go (computeSignature,
+// buildStringToSign). The HTTP-shaped canonical-request assembly lives
+// in the auth module; this is the pure, parity-critical crypto.
+
+import std.string
+import std.cryptography
+import hmac
+
+exports (ALGORITHM, TERMINATOR, EMPTY_HASH, compute_signature, string_to_sign, sha256_hex_str)
+
+const ALGORITHM  = "AWS4-HMAC-SHA256"
+const TERMINATOR = "aws4_request"
+const EMPTY_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+// SHA-256 hex of a string (length-aware).
+sha256_hex_str(s: string) -> string {
+    h, e = cryptography.sha256_hex(s, string.length(s))
+    return h
+}
+
+// Derive the SigV4 signing key chain and sign string_to_sign.
+// signature = HMAC(HMAC(HMAC(HMAC(HMAC("AWS4"+secret, date), region),
+//                    service), "aws4_request"), string_to_sign), as hex.
+// Each intermediate HMAC output is the raw 32-byte key for the next.
+compute_signature(secret_key: string, date: string, region: string, service: string, sts: string) -> string {
+    k0 = string.concat("AWS4", secret_key)
+    k1, l1 = hmac.sha256_raw(k0, string.length(k0), date, string.length(date))
+    k2, l2 = hmac.sha256_raw(k1, l1, region, string.length(region))
+    k3, l3 = hmac.sha256_raw(k2, l2, service, string.length(service))
+    k4, l4 = hmac.sha256_raw(k3, l3, TERMINATOR, string.length(TERMINATOR))
+    return hmac.sha256_hex(k4, l4, sts, string.length(sts))
+}
+
+// Build the string-to-sign. `credential_scope` may be the full
+// "AKID/date/region/service/aws4_request" credential — everything after
+// the first '/' is the scope (matching Go buildStringToSign). `timestamp`
+// is the amz date (YYYYMMDDThhmmssZ). canonical_request is hashed.
+string_to_sign(timestamp: string, credential_scope: string, canonical_request: string) -> string {
+    scope = credential_scope
+    slash = string.index_of(credential_scope, "/")
+    if slash >= 0 {
+        scope = string.substring(credential_scope, slash + 1, string.length(credential_scope))
+    }
+    cr_hash = sha256_hex_str(canonical_request)
+    nl = string.from_char(10)
+    out = ALGORITHM
+    out = string.concat(out, string.concat(nl, timestamp))
+    out = string.concat(out, string.concat(nl, scope))
+    out = string.concat(out, string.concat(nl, cr_hash))
+    return out
+}
