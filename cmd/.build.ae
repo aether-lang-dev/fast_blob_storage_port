@@ -8,7 +8,7 @@
 import build
 import aether
 
-main() {
+aeb(cap) {
     b = build.start()
     aether.program(b) {
         source("main.ae")
