@@ -9,6 +9,7 @@
 
 import std.http
 import std.string
+import std.json
 import contrib.sqlite
 import schema
 import users
@@ -54,24 +55,37 @@ _require_admin(req: ptr) -> {
     return uid, ""
 }
 
+// Encode a freshly-built json object, free it, and return the string.
+_encode(root: ptr) -> string {
+    out, e = json.encode(root)
+    json.free(root)
+    return out
+}
+
+// One-field {"error": msg} body.
+_error_json(msg: string) -> string {
+    root = json.obj()
+    json.set(root, "error", json.str(msg))
+    return _encode(root)
+}
+
 // GET /api/setup/status
 handle_setup_status(req: ptr, res: ptr, ud: ptr) {
     db = appstate_get_db()
     n = users.user_count(db)
-    required = "false"
-    if n == 0 { required = "true" }
-    body = string.concat("{\"bootstrap_required\":", required)
-    body = string.concat(body, ",\"region\":\"")
-    body = string.concat(body, region.REGION)
-    body = string.concat(body, "\"}")
-    _json(res, 200, body)
+    required = 0
+    if n == 0 { required = 1 }
+    root = json.obj()
+    json.set(root, "bootstrap_required", json.boolean(required))
+    json.set(root, "region", json.str(region.REGION))
+    _json(res, 200, _encode(root))
 }
 
 // POST /api/setup/bootstrap — create first admin, return creds JSON once.
 handle_bootstrap(req: ptr, res: ptr, ud: ptr) {
     db = appstate_get_db()
     if users.user_count(db) > 0 {
-        _json(res, 409, "{\"error\":\"users already exist\"}")
+        _json(res, 409, _error_json("users already exist"))
         return
     }
     ak, raw, hash = tokens.issue_bearer()
@@ -79,19 +93,18 @@ handle_bootstrap(req: ptr, res: ptr, ud: ptr) {
     uid = _new_uuid()
     cerr = users.user_insert(db, uid, "Initial Admin", ak, hash, sak, ssecret, "admin", 1, "", "")
     if cerr != "" {
-        _json(res, 500, "{\"error\":\"failed to create admin\"}")
+        _json(res, 500, _error_json("failed to create admin"))
         return
     }
-    body = "{\"bearer_token\":\""
-    body = string.concat(body, raw)
-    body = string.concat(body, "\",\"sigv4_access_key_id\":\"")
-    body = string.concat(body, sak)
-    body = string.concat(body, "\",\"sigv4_secret_key\":\"")
-    body = string.concat(body, ssecret)
-    body = string.concat(body, "\",\"region\":\"")
-    body = string.concat(body, region.REGION)
-    body = string.concat(body, "\"}")
-    _json(res, 201, body)
+    // std.json escapes the credential strings (which can contain any
+    // character) correctly — the hand-concat version assumed they were
+    // JSON-safe.
+    root = json.obj()
+    json.set(root, "bearer_token", json.str(raw))
+    json.set(root, "sigv4_access_key_id", json.str(sak))
+    json.set(root, "sigv4_secret_key", json.str(ssecret))
+    json.set(root, "region", json.str(region.REGION))
+    _json(res, 201, _encode(root))
 }
 
 // GET /api/management/metrics
@@ -100,11 +113,15 @@ handle_metrics(req: ptr, res: ptr, ud: ptr) {
     if aerr != "" {
         st = 401
         if string.equals(aerr, "forbidden") == 1 { st = 403 }
-        _json(res, st, "{\"error\":\"unauthorized\"}")
+        _json(res, st, _error_json("unauthorized"))
         return
     }
     db = appstate_get_db()
     bc, oc, ob, uc, auc = management.metrics(db)
+    // Metrics are integer counts/bytes. std.json's num() is float-only
+    // and renders large values in scientific notation (e.g. 5.3e+07),
+    // which would corrupt total_object_bytes — so these stay hand-built
+    // with string.from_int (no escaping concern: all integers).
     body = "{\"bucket_count\":"
     body = string.concat(body, string.from_int(bc))
     body = string.concat(body, ",\"object_count\":")
