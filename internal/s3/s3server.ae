@@ -18,7 +18,12 @@ import users
 import auth
 import s3xml
 import region
-import uuid
+import std.uuid
+
+_new_uuid() -> string {
+    u, e = uuid.v4()
+    return u
+}
 import multipart
 import std.collections (*)
 
@@ -327,7 +332,7 @@ _copy_object_impl(req: ptr, res: ptr, copy_source: string) {
         return
     }
     etag = _etag(data, dlen)
-    oid = uuid.new_uuid()
+    oid = _new_uuid()
     objects.object_upsert(db, oid, dbucket, dkey, nsize, etag, sct, nsp, "", "")
     http.response_set_status(res, 200)
     http.response_set_header(res, "Content-Type", "application/xml")
@@ -367,7 +372,7 @@ _put_object_impl(req: ptr, res: ptr) {
     etag = _etag(body, blen)
     ct = http.get_header(req, "Content-Type")
     if ct == null { ct = "" }
-    oid = uuid.new_uuid()
+    oid = _new_uuid()
     uerr = objects.object_upsert(db, oid, bucket, key, size, etag, ct, sp, "", "")
     if uerr != "" {
         storage.delete_object(data_dir, sp)
@@ -499,7 +504,7 @@ _create_mpu_impl(req: ptr, res: ptr) {
         _send_error(res, 404, "NoSuchBucket", "The specified bucket does not exist.", path)
         return
     }
-    upid = uuid.new_uuid()
+    upid = _new_uuid()
     ct = http.get_header(req, "Content-Type")
     if ct == null { ct = "" }
     cerr = multipart.mpu_create(db, upid, bucket, key, ct)
@@ -600,7 +605,7 @@ _complete_mpu_impl(req: ptr, res: ptr, upload_id: string) {
     // ETag = md5 of assembled object (simplified; Go uses md5-of-md5s).
     data, dlen, rerr = storage.read(data_dir, sp)
     etag = _etag(data, dlen)
-    oid = uuid.new_uuid()
+    oid = _new_uuid()
     objects.object_upsert(db, oid, bucket, key, total, etag, ct, sp, "", "")
     // cleanup parts + upload record
     multipart.mpu_delete(db, upload_id)

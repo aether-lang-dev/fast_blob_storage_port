@@ -2,21 +2,33 @@
 // Bearer: access_key_id = "fbsa_" + hex; raw token = "<ak>.<secret>";
 // stored secret_hash = sha256(secret). SigV4: access_key_id = "fbsv4_" +
 // hex, secret_key = hex. Secrets are returned once to the caller.
+//
+// MODERNIZED (ae 0.260.0): secrets now come from the OS CSPRNG via
+// std.cryptography.random_hex (was a wall-clock-seeded PRNG — a real
+// predictable-credential weakness). See aether #630.
 
 import std.string
+import std.cryptography
 import auth
-import uuid
 
 exports (issue_bearer, issue_sigv4)
 
 const BEARER_PREFIX = "fbsa_"
 const SIGV4_PREFIX  = "fbsv4_"
 
+// `n` bytes of CSPRNG hex (2*n chars). Discards the (never-failing on a
+// healthy host) error slot; an empty string would surface downstream as
+// a rejected credential rather than a silent weak one.
+_rand_hex(n: int) -> string {
+    h, e = cryptography.random_hex(n)
+    return h
+}
+
 // Returns (access_key_id, raw_token, secret_hash). raw_token is shown to
 // the operator once; secret_hash is what to store.
 issue_bearer() -> {
-    ak = string.concat(BEARER_PREFIX, uuid.new_hex(12))
-    secret = uuid.new_hex(24)
+    ak = string.concat(BEARER_PREFIX, _rand_hex(12))
+    secret = _rand_hex(24)
     raw = string.concat(ak, string.concat(".", secret))
     hash = auth.hash_secret(secret)
     return ak, raw, hash
@@ -25,7 +37,7 @@ issue_bearer() -> {
 // Returns (sigv4_access_key_id, sigv4_secret_key) — both stored, both
 // returned to the operator once.
 issue_sigv4() -> {
-    ak = string.concat(SIGV4_PREFIX, uuid.new_hex(12))
-    secret = uuid.new_hex(24)
+    ak = string.concat(SIGV4_PREFIX, _rand_hex(12))
+    secret = _rand_hex(24)
     return ak, secret
 }

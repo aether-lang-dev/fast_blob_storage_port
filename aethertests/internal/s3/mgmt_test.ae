@@ -10,7 +10,12 @@ import s3server
 import mgmt
 import contrib.sqlite
 import std.string
-import uuid
+import std.cryptography
+
+_hex(n: int) -> string {
+    h, e = cryptography.random_hex(n)
+    return h
+}
 
 extern http_server_start_background_raw(server: ptr) -> int
 extern http_server_port(server: ptr) -> int
@@ -30,7 +35,7 @@ main() {
     fw = aeocha.init()
 
     db, oerr = schema.open_db(":memory:")
-    data_dir = string.concat("/tmp/fbs_mgmt_", uuid.new_hex(6))
+    data_dir = string.concat("/tmp/fbs_mgmt_", _hex(6))
 
     s = http.server_create(0)
     http.server_set_host(s, "127.0.0.1")

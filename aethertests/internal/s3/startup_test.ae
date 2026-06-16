@@ -6,7 +6,12 @@ import startup
 import contrib.sqlite
 import std.string
 import std.fs
-import uuid
+import std.cryptography
+
+_hex(n: int) -> string {
+    h, e = cryptography.random_hex(n)
+    return h
+}
 
 extern fs_path_exists(path: string) -> int
 
@@ -17,7 +22,7 @@ main() {
     sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role) VALUES ('u','U','ak','sh','admin')")
     sqlite.exec(db, "INSERT INTO buckets (name, owner_id) VALUES ('b','u')")
 
-    data_dir = string.concat("/tmp/fbs_recon_", uuid.new_hex(6))
+    data_dir = string.concat("/tmp/fbs_recon_", _hex(6))
     fs.mkdir_p(data_dir)
 
     // a real, tracked object

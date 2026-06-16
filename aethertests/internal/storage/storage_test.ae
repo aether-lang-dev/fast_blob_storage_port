@@ -5,12 +5,17 @@ import std.fs
 import std.bytes
 
 // Unique-ish temp data dir for this run (uuid avoids cross-run clashes).
-import uuid
+import std.cryptography
+
+_hex(n: int) -> string {
+    h, e = cryptography.random_hex(n)
+    return h
+}
 
 main() {
     fw = aeocha.init()
 
-    base = string.concat("/tmp/fbs_storage_test_", uuid.new_hex(6))
+    base = string.concat("/tmp/fbs_storage_test_", _hex(6))
     data_dir, nerr = storage.new(base)
 
     aeocha.describe(fw, "storage.validate_key") {

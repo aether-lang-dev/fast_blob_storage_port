@@ -14,8 +14,21 @@
 import std.string
 import std.fs
 import std.collections (*)
+import std.uuid
+import std.cryptography
 import pathutil
-import uuid
+
+// `new_uuid()` shim — std.uuid.v4 returns (val, err); storage paths just
+// want the bare string (CSPRNG-sourced, replacing the old lib/uuid).
+_new_uuid() -> string {
+    u, e = uuid.v4()
+    return u
+}
+
+_rand_hex(n: int) -> string {
+    h, e = cryptography.random_hex(n)
+    return h
+}
 
 // Raw fs externs the qualified `fs.` wrappers don't expose. Declared
 // locally because `import std.fs (*)` mis-types the tuple-returning
@@ -211,7 +224,7 @@ write(data_dir: string, bucket: string, key: string, data: string, length: int) 
     if rerr != "" {
         return "", 0, rerr
     }
-    sp = pathutil.join(bucket, uuid.new_uuid())
+    sp = pathutil.join(bucket, _new_uuid())
     full = pathutil.join(data_dir, sp)
     if pathutil.is_within_base(data_dir, full) == 0 {
         return "", 0, ERR_PATH_TRAVERSAL
@@ -301,7 +314,7 @@ write_part(data_dir: string, upload_id: string, part_number: int, data: string, 
         return "", 0, derr
     }
     pn = string.from_int(part_number)
-    fname = string.concat(pn, string.concat(".", uuid.new_hex(8)))
+    fname = string.concat(pn, string.concat(".", _rand_hex(8)))
     full = pathutil.join(part_dir, fname)
     werr = fs.write_atomic(full, data, length)
     if werr != "" {
@@ -323,7 +336,7 @@ assemble_parts(data_dir: string, bucket: string, key: string, part_full_paths: p
     if verr != "" {
         return "", 0, verr
     }
-    sp = pathutil.join(bucket, uuid.new_uuid())
+    sp = pathutil.join(bucket, _new_uuid())
     full = pathutil.join(data_dir, sp)
     if pathutil.is_within_base(data_dir, full) == 0 {
         return "", 0, ERR_PATH_TRAVERSAL

@@ -18,7 +18,12 @@ import management
 import auth
 import tokens
 import region
-import uuid
+import std.uuid
+
+_new_uuid() -> string {
+    u, e = uuid.v4()
+    return u
+}
 
 exports (register_mgmt_routes)
 
@@ -71,7 +76,7 @@ handle_bootstrap(req: ptr, res: ptr, ud: ptr) {
     }
     ak, raw, hash = tokens.issue_bearer()
     sak, ssecret = tokens.issue_sigv4()
-    uid = uuid.new_uuid()
+    uid = _new_uuid()
     cerr = users.user_insert(db, uid, "Initial Admin", ak, hash, sak, ssecret, "admin", 1, "", "")
     if cerr != "" {
         _json(res, 500, "{\"error\":\"failed to create admin\"}")
