@@ -1,27 +1,27 @@
 import aeocha
-import urlescape
+import std.url
 
+// Was lib/urlescape parity; now asserts std.url.encode_path (#629) keeps
+// Go url.PathEscape parity — which publicread.ObjectPath signatures depend on.
 main() {
     fw = aeocha.init()
-
-    aeocha.describe(fw, "urlescape.path_escape (Go url.PathEscape parity)") {
+    aeocha.describe(fw, "std.url.encode_path (Go url.PathEscape parity)") {
         aeocha.it("space becomes %20") callback {
-            aeocha.assert_str_eq(fw, urlescape.path_escape("my bucket"), "my%20bucket", "space")
+            aeocha.assert_str_eq(fw, url.encode_path("my bucket"), "my%20bucket", "space")
         }
-        aeocha.it("plus and dash and dot preserved") callback {
-            aeocha.assert_str_eq(fw, urlescape.path_escape("a+b"), "a+b", "plus")
-            aeocha.assert_str_eq(fw, urlescape.path_escape("a-b.txt"), "a-b.txt", "dash-dot")
+        aeocha.it("plus dash dot preserved") callback {
+            aeocha.assert_str_eq(fw, url.encode_path("a+b"), "a+b", "plus")
+            aeocha.assert_str_eq(fw, url.encode_path("a-b.txt"), "a-b.txt", "dashdot")
         }
         aeocha.it("c d.txt") callback {
-            aeocha.assert_str_eq(fw, urlescape.path_escape("c d.txt"), "c%20d.txt", "mixed")
+            aeocha.assert_str_eq(fw, url.encode_path("c d.txt"), "c%20d.txt", "mixed")
         }
         aeocha.it("sub-delims kept, comma/semicolon escaped") callback {
-            aeocha.assert_str_eq(fw, urlescape.path_escape("@:&=+$,;"), "@:&=+$%2C%3B", "subdelims")
+            aeocha.assert_str_eq(fw, url.encode_path("@:&=+$,;"), "@:&=+$%2C%3B", "subdelims")
         }
         aeocha.it("tilde underscore kept, bang star escaped") callback {
-            aeocha.assert_str_eq(fw, urlescape.path_escape("~_.!*'()"), "~_.%21%2A%27%28%29", "specials")
+            aeocha.assert_str_eq(fw, url.encode_path("~_.!*'()"), "~_.%21%2A%27%28%29", "specials")
         }
     }
-
     aeocha.run_summary(fw)
 }

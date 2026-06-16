@@ -76,34 +76,19 @@ _authenticate(req: ptr) -> {
     return uid, role, ""
 }
 
-// Read a single query parameter by parsing request_query() ourselves.
-// std.http.get_query_param is broken for multi-param queries (aether
-// #625 — returns the last param's value for every key). Returns "" if
-// absent.
+// Read a single `name=value` query parameter. The multi-param bug that
+// once forced a hand-rolled parser here (aether #625) is fixed in std,
+// so this now wraps the builtin and normalises its null-on-absent return
+// to "".
 _query_param(req: ptr, name: string) -> string {
-    q = http.request_query(req)
-    if string.length(q) == 0 { return "" }
-    pairs = string.split(q, "&")
-    n = string.array_size(pairs)
-    target = string.concat(name, "=")
-    out = ""
-    found = 0
-    i = 0
-    while i < n {
-        kv = string.array_get(pairs, i)
-        if found == 0 {
-            if string.starts_with(kv, target) == 1 {
-                out = string.copy(string.substring(kv, string.length(target), string.length(kv)))
-                found = 1
-            }
-        }
-        i = i + 1
-    }
-    string.array_free(pairs)
-    return out
+    v = http.get_query_param(req, name)
+    if v == null { return "" }
+    return v
 }
 
-// 1 if the query contains the given key/flag (e.g. ?uploads, ?location).
+// 1 if the query contains the given bare flag/key (e.g. ?uploads,
+// ?location, ?delete — value-less, so get_query_param returns null;
+// a substring check on the raw query is the right test).
 _query_has(req: ptr, name: string) -> int {
     q = http.request_query(req)
     if string.contains(q, name) == 1 { return 1 }

@@ -16,7 +16,7 @@
 import std.string
 import std.cryptography
 import hmac
-import urlescape
+import std.url
 
 exports (
     ERR_DISABLED, ERR_MALFORMED, ERR_EXPIRED, ERR_INVALID,
@@ -81,7 +81,7 @@ verify(secret: string, path: string, expires_str: string, signature_hex: string,
 // Slashes in the key are preserved (segments escaped individually),
 // matching Go's split-on-"/" + url.PathEscape per segment.
 object_path(bucket: string, key: string) -> string {
-    out = string.concat("/public/", urlescape.path_escape(bucket))
+    out = string.concat("/public/", url.encode_path(bucket))
     out = string.concat(out, "/")
 
     segs = string.split(key, "/")
@@ -89,7 +89,7 @@ object_path(bucket: string, key: string) -> string {
     i = 0
     while i < n {
         seg = string.array_get(segs, i)
-        out = string.concat(out, urlescape.path_escape(seg))
+        out = string.concat(out, url.encode_path(seg))
         if i < n - 1 {
             out = string.concat(out, "/")
         }
