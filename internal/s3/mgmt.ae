@@ -20,6 +20,7 @@ import auth
 import tokens
 import region
 import std.uuid
+import s3server (AppCtx)
 
 _new_uuid() -> string {
     u, e = uuid.v4()
@@ -28,7 +29,6 @@ _new_uuid() -> string {
 
 exports (register_mgmt_routes)
 
-extern appstate_get_db() -> ptr
 
 _json(res: ptr, status: int, body: string) {
     http.response_set_status(res, status)
@@ -37,7 +37,7 @@ _json(res: ptr, status: int, body: string) {
 }
 
 // Authenticate + require admin. Returns (user_id, "") or ("", err).
-_require_admin(req: ptr) -> {
+_require_admin(ctx: *AppCtx, req: ptr) -> {
     hdr = http.get_header(req, "Authorization")
     if hdr == null { return "", "unauthorized" }
     prefix = "Bearer "
@@ -45,7 +45,7 @@ _require_admin(req: ptr) -> {
     token = string.substring(hdr, string.length(prefix), string.length(hdr))
     ak, sec, berr = auth.split_bearer(token)
     if berr != "" { return "", "unauthorized" }
-    db = appstate_get_db()
+    db = ctx.db
     hash, herr = users.user_get_secret_hash(db, ak)
     if herr != "" { return "", "unauthorized" }
     if auth.verify_secret(sec, hash) != 1 { return "", "unauthorized" }
@@ -71,7 +71,8 @@ _error_json(msg: string) -> string {
 
 // GET /api/setup/status
 handle_setup_status(req: ptr, res: ptr, ud: ptr) {
-    db = appstate_get_db()
+    ctx = ud as *AppCtx
+    db = ctx.db
     n = users.user_count(db)
     required = 0
     if n == 0 { required = 1 }
@@ -83,7 +84,8 @@ handle_setup_status(req: ptr, res: ptr, ud: ptr) {
 
 // POST /api/setup/bootstrap — create first admin, return creds JSON once.
 handle_bootstrap(req: ptr, res: ptr, ud: ptr) {
-    db = appstate_get_db()
+    ctx = ud as *AppCtx
+    db = ctx.db
     if users.user_count(db) > 0 {
         _json(res, 409, _error_json("users already exist"))
         return
@@ -109,14 +111,15 @@ handle_bootstrap(req: ptr, res: ptr, ud: ptr) {
 
 // GET /api/management/metrics
 handle_metrics(req: ptr, res: ptr, ud: ptr) {
-    uid, aerr = _require_admin(req)
+    ctx = ud as *AppCtx
+    uid, aerr = _require_admin(ctx, req)
     if aerr != "" {
         st = 401
         if string.equals(aerr, "forbidden") == 1 { st = 403 }
         _json(res, st, _error_json("unauthorized"))
         return
     }
-    db = appstate_get_db()
+    db = ctx.db
     bc, oc, ob, uc, auc = management.metrics(db)
     // Metrics are integer counts/bytes. std.json's num() is float-only
     // and renders large values in scientific notation (e.g. 5.3e+07),
@@ -136,8 +139,8 @@ handle_metrics(req: ptr, res: ptr, ud: ptr) {
     _json(res, 200, body)
 }
 
-register_mgmt_routes(server: ptr) {
-    http.server_get(server, "/api/setup/status", handle_setup_status, 0)
-    http.server_post(server, "/api/setup/bootstrap", handle_bootstrap, 0)
-    http.server_get(server, "/api/management/metrics", handle_metrics, 0)
+register_mgmt_routes(server: ptr, ctx: ptr) {
+    http.server_get(server, "/api/setup/status", handle_setup_status, ctx)
+    http.server_post(server, "/api/setup/bootstrap", handle_bootstrap, ctx)
+    http.server_get(server, "/api/management/metrics", handle_metrics, ctx)
 }

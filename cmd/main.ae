@@ -55,9 +55,9 @@ main() {
 
     s = http.server_create(port)
     http.server_set_host(s, host)
-    s3server.set_state(db, data_dir)
-    s3server.register_routes(s)
-    mgmt.register_mgmt_routes(s)
+    ctx = s3server.set_state(db, data_dir)
+    s3server.register_routes(s, ctx)
+    mgmt.register_mgmt_routes(s, ctx)
 
     println("fbs-core (Aether) listening on ${host}:${port}")
     println("data dir: ${data_dir}  db: ${db_path}")

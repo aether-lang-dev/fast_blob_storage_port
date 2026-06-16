@@ -39,9 +39,9 @@ main() {
 
     s = http.server_create(0)
     http.server_set_host(s, "127.0.0.1")
-    s3server.set_state(db, data_dir)
-    s3server.register_routes(s)
-    mgmt.register_mgmt_routes(s)
+    ctx = s3server.set_state(db, data_dir)
+    s3server.register_routes(s, ctx)
+    mgmt.register_mgmt_routes(s, ctx)
     http_server_start_background_raw(s)
     sleep(250)
     port = http_server_port(s)

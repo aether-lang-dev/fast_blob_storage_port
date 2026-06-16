@@ -27,24 +27,35 @@ _new_uuid() -> string {
 import multipart
 import std.collections (*)
 
-exports (register_routes, set_state)
+exports (register_routes, set_state, AppCtx)
+
+extern malloc(n: int) -> ptr
 
 // ---- shared state ----
-extern appstate_set_db(db: ptr)
-extern appstate_get_db() -> ptr
-extern appstate_set_data_dir(dir: string)
-extern appstate_get_data_dir() -> string
+// MODERNIZED (ae 0.260.0): per-server state (db handle + data dir) now
+// rides the std.http user_data slot (#633), replacing the appstate.c
+// process-statics C shim. set_state allocates an AppCtx once at startup;
+// register_routes threads its ptr as user_data; each handler reads it
+// back via `ud as *AppCtx`.
+struct AppCtx {
+    db: ptr
+    data_dir: string
+}
 
-set_state(db: ptr, data_dir: string) {
-    appstate_set_db(db)
-    appstate_set_data_dir(data_dir)
+// Build the per-server context. Allocated once in main(); lives for the
+// process (OS reclaims on exit), so never freed.
+set_state(db: ptr, data_dir: string) -> ptr {
+    ctx = malloc(64) as *AppCtx
+    ctx.db = db
+    ctx.data_dir = data_dir
+    return ctx
 }
 
 // ---- helpers ----
 
 // md5 hex of a length-aware body.
 _etag(body: string, length: int) -> string {
-    h, e = cryptography.hash_hex("md5", body, length)
+    h, e = cryptography.md5_hex(body, length)
     return h
 }
 
@@ -56,7 +67,7 @@ _send_error(res: ptr, status: int, code: string, msg: string, resource: string) 
 
 // Authenticate a request via bearer token. Returns (user_id, role, "")
 // or ("", "", err). Pure bearer for now.
-_authenticate(req: ptr) -> {
+_authenticate(ctx: *AppCtx, req: ptr) -> {
     hdr = http.get_header(req, "Authorization")
     if hdr == null { return "", "", "missing" }
     if string.length(hdr) == 0 { return "", "", "missing" }
@@ -66,7 +77,7 @@ _authenticate(req: ptr) -> {
     token = string.substring(hdr, string.length(prefix), string.length(hdr))
     ak, sec, berr = auth.split_bearer(token)
     if berr != "" { return "", "", berr }
-    db = appstate_get_db()
+    db = ctx.db
     hash, herr = users.user_get_secret_hash(db, ak)
     if herr != "" { return "", "", "invalid" }
     if auth.verify_secret(sec, hash) != 1 { return "", "", "invalid" }
@@ -108,12 +119,13 @@ _object_key(path: string, bucket: string) -> string {
 
 // GET / — ListBuckets (admin: all; member: owned).
 handle_list_buckets(req: ptr, res: ptr, ud: ptr) {
-    uid, role, aerr = _authenticate(req)
+    ctx = ud as *AppCtx
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", "/")
         return
     }
-    db = appstate_get_db()
+    db = ctx.db
     names = ""
     if string.equals(role, "admin") == 1 {
         names = buckets.bucket_list_names(db)
@@ -141,13 +153,14 @@ handle_list_buckets(req: ptr, res: ptr, ud: ptr) {
 
 // PUT /:bucket — CreateBucket.
 handle_create_bucket(req: ptr, res: ptr, ud: ptr) {
-    uid, role, aerr = _authenticate(req)
+    ctx = ud as *AppCtx
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
         return
     }
     bucket = http.get_path_param(req, "bucket")
-    db = appstate_get_db()
+    db = ctx.db
     if buckets.bucket_exists(db, bucket) == 1 {
         _send_error(res, 409, "BucketAlreadyOwnedByYou", "You already own it.", http.request_path(req))
         return
@@ -165,10 +178,11 @@ handle_create_bucket(req: ptr, res: ptr, ud: ptr) {
 
 // HEAD /:bucket — HeadBucket.
 handle_head_bucket(req: ptr, res: ptr, ud: ptr) {
-    uid, role, aerr = _authenticate(req)
+    ctx = ud as *AppCtx
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" { http.response_set_status(res, 403) http.response_set_body(res, "") return }
     bucket = http.get_path_param(req, "bucket")
-    db = appstate_get_db()
+    db = ctx.db
     if buckets.bucket_exists(db, bucket) == 0 {
         http.response_set_status(res, 404)
         http.response_set_body(res, "")
@@ -180,23 +194,24 @@ handle_head_bucket(req: ptr, res: ptr, ud: ptr) {
 
 // DELETE /:bucket dispatcher — bulk DeleteObjects if ?delete, else DeleteBucket.
 handle_delete_bucket(req: ptr, res: ptr, ud: ptr) {
+    ctx = ud as *AppCtx
     if _query_has(req, "delete") == 1 {
-        _delete_objects_impl(req, res)
+        _delete_objects_impl(ctx, req, res)
         return
     }
-    _delete_bucket_impl(req, res)
+    _delete_bucket_impl(ctx, req, res)
 }
 
 // Bulk delete: POST/DELETE /:bucket?delete with <Delete><Object><Key>..
-_delete_objects_impl(req: ptr, res: ptr) {
-    uid, role, aerr = _authenticate(req)
+_delete_objects_impl(ctx: *AppCtx, req: ptr, res: ptr) {
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
         return
     }
     bucket = http.get_path_param(req, "bucket")
-    db = appstate_get_db()
-    data_dir = appstate_get_data_dir()
+    db = ctx.db
+    data_dir = ctx.data_dir
     body = http.request_body(req)
 
     // Parse the <Key> list with the std.xml reader (was index_of scanning).
@@ -225,14 +240,14 @@ _delete_objects_impl(req: ptr, res: ptr) {
 }
 
 // DELETE /:bucket — DeleteBucket (must be empty).
-_delete_bucket_impl(req: ptr, res: ptr) {
-    uid, role, aerr = _authenticate(req)
+_delete_bucket_impl(ctx: *AppCtx, req: ptr, res: ptr) {
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
         return
     }
     bucket = http.get_path_param(req, "bucket")
-    db = appstate_get_db()
+    db = ctx.db
     if buckets.bucket_exists(db, bucket) == 0 {
         _send_error(res, 404, "NoSuchBucket", "The specified bucket does not exist.", http.request_path(req))
         return
@@ -250,25 +265,26 @@ _delete_bucket_impl(req: ptr, res: ptr) {
 
 // PUT /:bucket/* dispatcher — UploadPart if ?uploadId&partNumber, else PutObject.
 handle_put_object(req: ptr, res: ptr, ud: ptr) {
+    ctx = ud as *AppCtx
     upload_id = _query_param(req, "uploadId")
     if string.length(upload_id) > 0 {
-        _upload_part_impl(req, res)
+        _upload_part_impl(ctx, req, res)
         return
     }
     // CopyObject if x-amz-copy-source present.
     csrc = http.get_header(req, "x-amz-copy-source")
     if csrc != null {
         if string.length(csrc) > 0 {
-            _copy_object_impl(req, res, csrc)
+            _copy_object_impl(ctx, req, res, csrc)
             return
         }
     }
-    _put_object_impl(req, res)
+    _put_object_impl(ctx, req, res)
 }
 
 // PUT /:bucket/* with x-amz-copy-source — CopyObject.
-_copy_object_impl(req: ptr, res: ptr, copy_source: string) {
-    uid, role, aerr = _authenticate(req)
+_copy_object_impl(ctx: *AppCtx, req: ptr, res: ptr, copy_source: string) {
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
         return
@@ -276,8 +292,8 @@ _copy_object_impl(req: ptr, res: ptr, copy_source: string) {
     dbucket = http.get_path_param(req, "bucket")
     dpath = http.request_path(req)
     dkey = _object_key(dpath, dbucket)
-    db = appstate_get_db()
-    data_dir = appstate_get_data_dir()
+    db = ctx.db
+    data_dir = ctx.data_dir
 
     // parse "/srcBucket/srcKey" or "srcBucket/srcKey"
     src = copy_source
@@ -320,8 +336,8 @@ _copy_object_impl(req: ptr, res: ptr, copy_source: string) {
 }
 
 // PUT /:bucket/* — PutObject.
-_put_object_impl(req: ptr, res: ptr) {
-    uid, role, aerr = _authenticate(req)
+_put_object_impl(ctx: *AppCtx, req: ptr, res: ptr) {
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
         return
@@ -329,8 +345,8 @@ _put_object_impl(req: ptr, res: ptr) {
     bucket = http.get_path_param(req, "bucket")
     path = http.request_path(req)
     key = _object_key(path, bucket)
-    db = appstate_get_db()
-    data_dir = appstate_get_data_dir()
+    db = ctx.db
+    data_dir = ctx.data_dir
 
     if buckets.bucket_exists(db, bucket) == 0 {
         _send_error(res, 404, "NoSuchBucket", "The specified bucket does not exist.", path)
@@ -367,7 +383,8 @@ _put_object_impl(req: ptr, res: ptr) {
 
 // GET /:bucket/* — GetObject.
 handle_get_object(req: ptr, res: ptr, ud: ptr) {
-    uid, role, aerr = _authenticate(req)
+    ctx = ud as *AppCtx
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
         return
@@ -375,8 +392,8 @@ handle_get_object(req: ptr, res: ptr, ud: ptr) {
     bucket = http.get_path_param(req, "bucket")
     path = http.request_path(req)
     key = _object_key(path, bucket)
-    db = appstate_get_db()
-    data_dir = appstate_get_data_dir()
+    db = ctx.db
+    data_dir = ctx.data_dir
 
     oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, key)
     if gerr != "" {
@@ -397,12 +414,13 @@ handle_get_object(req: ptr, res: ptr, ud: ptr) {
 
 // HEAD /:bucket/* — HeadObject.
 handle_head_object(req: ptr, res: ptr, ud: ptr) {
-    uid, role, aerr = _authenticate(req)
+    ctx = ud as *AppCtx
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" { http.response_set_status(res, 403) http.response_set_body(res, "") return }
     bucket = http.get_path_param(req, "bucket")
     path = http.request_path(req)
     key = _object_key(path, bucket)
-    db = appstate_get_db()
+    db = ctx.db
     oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, key)
     if gerr != "" {
         http.response_set_status(res, 404)
@@ -419,19 +437,20 @@ handle_head_object(req: ptr, res: ptr, ud: ptr) {
 
 // DELETE /:bucket/* dispatcher — AbortMultipartUpload if ?uploadId, else DeleteObject.
 handle_delete_object(req: ptr, res: ptr, ud: ptr) {
+    ctx = ud as *AppCtx
     upload_id = _query_param(req, "uploadId")
     if upload_id != null {
         if string.length(upload_id) > 0 {
-            _abort_mpu_impl(req, res, upload_id)
+            _abort_mpu_impl(ctx, req, res, upload_id)
             return
         }
     }
-    _delete_object_impl(req, res)
+    _delete_object_impl(ctx, req, res)
 }
 
 // DELETE /:bucket/* — DeleteObject.
-_delete_object_impl(req: ptr, res: ptr) {
-    uid, role, aerr = _authenticate(req)
+_delete_object_impl(ctx: *AppCtx, req: ptr, res: ptr) {
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
         return
@@ -439,8 +458,8 @@ _delete_object_impl(req: ptr, res: ptr) {
     bucket = http.get_path_param(req, "bucket")
     path = http.request_path(req)
     key = _object_key(path, bucket)
-    db = appstate_get_db()
-    data_dir = appstate_get_data_dir()
+    db = ctx.db
+    data_dir = ctx.data_dir
 
     oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, key)
     if gerr == "" {
@@ -456,22 +475,23 @@ _delete_object_impl(req: ptr, res: ptr) {
 // POST /:bucket/* dispatcher — CreateMultipartUpload if ?uploads,
 // CompleteMultipartUpload if ?uploadId.
 handle_post_object(req: ptr, res: ptr, ud: ptr) {
+    ctx = ud as *AppCtx
     if _query_has(req, "uploads") == 1 {
-        _create_mpu_impl(req, res)
+        _create_mpu_impl(ctx, req, res)
         return
     }
     upload_id = _query_param(req, "uploadId")
     if upload_id != null {
         if string.length(upload_id) > 0 {
-            _complete_mpu_impl(req, res, upload_id)
+            _complete_mpu_impl(ctx, req, res, upload_id)
             return
         }
     }
     _send_error(res, 501, "NotImplemented", "Not implemented.", http.request_path(req))
 }
 
-_create_mpu_impl(req: ptr, res: ptr) {
-    uid, role, aerr = _authenticate(req)
+_create_mpu_impl(ctx: *AppCtx, req: ptr, res: ptr) {
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
         return
@@ -479,7 +499,7 @@ _create_mpu_impl(req: ptr, res: ptr) {
     bucket = http.get_path_param(req, "bucket")
     path = http.request_path(req)
     key = _object_key(path, bucket)
-    db = appstate_get_db()
+    db = ctx.db
     if buckets.bucket_exists(db, bucket) == 0 {
         _send_error(res, 404, "NoSuchBucket", "The specified bucket does not exist.", path)
         return
@@ -497,15 +517,15 @@ _create_mpu_impl(req: ptr, res: ptr) {
     http.response_set_body(res, s3xml.initiate_mpu_xml(bucket, key, upid))
 }
 
-_upload_part_impl(req: ptr, res: ptr) {
-    uid, role, aerr = _authenticate(req)
+_upload_part_impl(ctx: *AppCtx, req: ptr, res: ptr) {
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
         return
     }
     path = http.request_path(req)
-    db = appstate_get_db()
-    data_dir = appstate_get_data_dir()
+    db = ctx.db
+    data_dir = ctx.data_dir
     upload_id = _query_param(req, "uploadId")
     pn_str = _query_param(req, "partNumber")
     if pn_str == null { pn_str = "0" }
@@ -537,8 +557,8 @@ _upload_part_impl(req: ptr, res: ptr) {
     http.response_set_body(res, "")
 }
 
-_complete_mpu_impl(req: ptr, res: ptr, upload_id: string) {
-    uid, role, aerr = _authenticate(req)
+_complete_mpu_impl(ctx: *AppCtx, req: ptr, res: ptr, upload_id: string) {
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
         return
@@ -546,8 +566,8 @@ _complete_mpu_impl(req: ptr, res: ptr, upload_id: string) {
     bucket = http.get_path_param(req, "bucket")
     path = http.request_path(req)
     key = _object_key(path, bucket)
-    db = appstate_get_db()
-    data_dir = appstate_get_data_dir()
+    db = ctx.db
+    data_dir = ctx.data_dir
 
     bk, mkey, ct, status, gerr = multipart.mpu_get_status(db, upload_id)
     if gerr != "" {
@@ -596,14 +616,14 @@ _complete_mpu_impl(req: ptr, res: ptr, upload_id: string) {
     http.response_set_body(res, s3xml.complete_mpu_xml(loc, bucket, key, etag))
 }
 
-_abort_mpu_impl(req: ptr, res: ptr, upload_id: string) {
-    uid, role, aerr = _authenticate(req)
+_abort_mpu_impl(ctx: *AppCtx, req: ptr, res: ptr, upload_id: string) {
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
         return
     }
-    db = appstate_get_db()
-    data_dir = appstate_get_data_dir()
+    db = ctx.db
+    data_dir = ctx.data_dir
     // delete part files
     storage.delete_upload_parts(data_dir, upload_id)
     multipart.mpu_delete(db, upload_id)
@@ -614,13 +634,14 @@ _abort_mpu_impl(req: ptr, res: ptr, upload_id: string) {
 // GET /:bucket with ?list-type=2 (we register it on the bucket GET; the
 // dispatcher checks the query) — ListObjectsV2.
 handle_list_objects(req: ptr, res: ptr, ud: ptr) {
-    uid, role, aerr = _authenticate(req)
+    ctx = ud as *AppCtx
+    uid, role, aerr = _authenticate(ctx, req)
     if aerr != "" {
         _send_error(res, 403, "AccessDenied", "Access denied.", http.request_path(req))
         return
     }
     bucket = http.get_path_param(req, "bucket")
-    db = appstate_get_db()
+    db = ctx.db
     if buckets.bucket_exists(db, bucket) == 0 {
         _send_error(res, 404, "NoSuchBucket", "The specified bucket does not exist.", http.request_path(req))
         return
@@ -656,6 +677,7 @@ handle_list_objects(req: ptr, res: ptr, ud: ptr) {
 // Dispatcher for GET /:bucket — list-type=2 -> list objects, ?location ->
 // location, else also list (v1-ish). Simplified: always list objects.
 handle_bucket_get(req: ptr, res: ptr, ud: ptr) {
+    ctx = ud as *AppCtx
     if _query_has(req, "location") == 1 {
         http.response_set_status(res, 200)
         http.response_set_header(res, "Content-Type", "application/xml")
@@ -668,24 +690,27 @@ handle_bucket_get(req: ptr, res: ptr, ud: ptr) {
 // Register all S3 routes on the server.
 // POST /:bucket — bulk DeleteObjects if ?delete, else 501.
 handle_bucket_post(req: ptr, res: ptr, ud: ptr) {
+    ctx = ud as *AppCtx
     if _query_has(req, "delete") == 1 {
-        _delete_objects_impl(req, res)
+        _delete_objects_impl(ctx, req, res)
         return
     }
     _send_error(res, 501, "NotImplemented", "Not implemented.", http.request_path(req))
 }
 
-register_routes(server: ptr) {
-    http.server_get(server, "/", handle_list_buckets, 0)
-    http.server_put(server, "/:bucket", handle_create_bucket, 0)
-    http.server_get(server, "/:bucket", handle_bucket_get, 0)
-    http.server_add_route(server, "HEAD", "/:bucket", handle_head_bucket, 0)
-    http.server_delete(server, "/:bucket", handle_delete_bucket, 0)
-    http.server_post(server, "/:bucket", handle_bucket_post, 0)
+// Register all routes, threading the per-server context (db + data_dir)
+// through the user_data slot to every handler.
+register_routes(server: ptr, ctx: ptr) {
+    http.server_get(server, "/", handle_list_buckets, ctx)
+    http.server_put(server, "/:bucket", handle_create_bucket, ctx)
+    http.server_get(server, "/:bucket", handle_bucket_get, ctx)
+    http.server_add_route(server, "HEAD", "/:bucket", handle_head_bucket, ctx)
+    http.server_delete(server, "/:bucket", handle_delete_bucket, ctx)
+    http.server_post(server, "/:bucket", handle_bucket_post, ctx)
 
-    http.server_put(server, "/:bucket/*", handle_put_object, 0)
-    http.server_get(server, "/:bucket/*", handle_get_object, 0)
-    http.server_add_route(server, "HEAD", "/:bucket/*", handle_head_object, 0)
-    http.server_post(server, "/:bucket/*", handle_post_object, 0)
-    http.server_delete(server, "/:bucket/*", handle_delete_object, 0)
+    http.server_put(server, "/:bucket/*", handle_put_object, ctx)
+    http.server_get(server, "/:bucket/*", handle_get_object, ctx)
+    http.server_add_route(server, "HEAD", "/:bucket/*", handle_head_object, ctx)
+    http.server_post(server, "/:bucket/*", handle_post_object, ctx)
+    http.server_delete(server, "/:bucket/*", handle_delete_object, ctx)
 }
