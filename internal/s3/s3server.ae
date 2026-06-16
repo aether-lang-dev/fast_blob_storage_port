@@ -400,16 +400,20 @@ handle_get_object(req: ptr, res: ptr, ud: ptr) {
         _send_error(res, 404, "NoSuchKey", "The specified key does not exist.", path)
         return
     }
-    data, dlen, rerr = storage.read(data_dir, sp)
-    if rerr != "" {
+    // Zero-copy download: serve the backing file via sendfile(2) instead
+    // of reading the whole object into RAM (#626 — the load-memory fix).
+    // serve_file derives Content-Type from the (extensionless UUID) file
+    // name, so override it + ETag with the stored values afterward
+    // (post-serve_file header sets win).
+    full, ferr = storage.resolve_storage_path(data_dir, sp)
+    if ferr != "" {
         _send_error(res, 404, "NoSuchKey", "The specified key does not exist.", path)
         return
     }
+    http.serve_file(res, full)
     qetag = string.concat("\"", string.concat(etag, "\""))
-    http.response_set_status(res, 200)
     http.response_set_header(res, "Content-Type", ct)
     http.response_set_header(res, "ETag", qetag)
-    http.response_set_body_n(res, data, dlen)
 }
 
 // HEAD /:bucket/* — HeadObject.
