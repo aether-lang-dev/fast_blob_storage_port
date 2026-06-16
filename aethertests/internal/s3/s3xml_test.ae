@@ -61,6 +61,10 @@ main() {
             has = string.contains(got, "us-east-1</LocationConstraint>")
             aeocha.assert_eq(fw, has, 1, "region")
         }
+        aeocha.it("parse_delete_keys via std.xml reader") callback {
+            keys = s3xml.parse_delete_keys("<Delete><Object><Key>a.txt</Key></Object><Object><Key>b/c.txt</Key></Object></Delete>")
+            aeocha.assert_str_eq(fw, keys, "a.txt\nb/c.txt", "two keys nl-joined")
+        }
     }
 
     aeocha.run_summary(fw)

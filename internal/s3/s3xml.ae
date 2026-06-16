@@ -1,11 +1,15 @@
-// internal.s3.s3xml — hand-written S3 XML response builders + the
-// multipart ETag. Aether has no XML encoder; S3's response bodies have
-// a fixed shape, so we emit them directly. Values that may contain XML
-// metacharacters (keys, bucket names) are escaped via xml_escape.
+// internal.s3.s3xml — S3 XML response builders + the multipart ETag.
+// S3 response bodies have a fixed shape, so they're emitted as templated
+// strings. MODERNIZED (ae 0.260.0): entity-escaping now delegates to
+// std.xml.escape (#627) — the bug-prone part — and the request-side
+// <Key> extraction (bulk delete) is parsed with the std.xml pull reader
+// (parse_delete_keys), replacing fragile index_of scanning.
 
 import std.string
 import std.cryptography
 import std.bytes
+import std.xml
+import std.collections (*)
 
 exports (
     xml_escape, xml_decl,
@@ -14,34 +18,14 @@ exports (
     list_bucket_v2_open, list_bucket_contents_xml, list_bucket_v2_close,
     initiate_mpu_xml, complete_mpu_xml, copy_object_xml, delete_result_open,
     delete_result_deleted_xml, delete_result_close, location_constraint_xml,
-    multipart_etag
+    multipart_etag, parse_delete_keys
 )
 
 const XMLNS = "http://s3.amazonaws.com/doc/2006-03-01/"
 
-// Escape &, <, >, ", ' for XML text/attribute content.
+// Escape &, <, >, ", ' for XML text/attribute content — std-hardened.
 xml_escape(s: string) -> string {
-    out = _replace(s, "&", "&amp;")
-    out = _replace(out, "<", "&lt;")
-    out = _replace(out, ">", "&gt;")
-    out = _replace(out, "\"", "&quot;")
-    out = _replace(out, "'", "&apos;")
-    return out
-}
-
-_replace(s: string, from: string, to: string) -> string {
-    parts = string.split(s, from)
-    n = string.array_size(parts)
-    out = ""
-    i = 0
-    while i < n {
-        seg = string.array_get(parts, i)
-        if i == 0 { out = string.copy(seg) }
-        else { out = string.concat(out, string.concat(to, seg)) }
-        i = i + 1
-    }
-    string.array_free(parts)
-    return out
+    return xml.escape(s)
 }
 
 xml_decl() -> string {
@@ -191,6 +175,40 @@ location_constraint_xml(region: string) -> string {
     out = string.concat(out, "\">")
     out = string.concat(out, xml_escape(region))
     out = string.concat(out, "</LocationConstraint>")
+    return out
+}
+
+// Parse a bulk-delete request body — <Delete><Object><Key>..</Key>.. —
+// returning every <Key> value joined by '\n' (entity-decoded by the
+// reader; "" if none). Replaces the old index_of("<Key>") scan with the
+// std.xml pull reader (#627), which handles whitespace/CDATA/escaping.
+parse_delete_keys(body: string) -> string {
+    p = xml.parser(body)
+    out = ""
+    first = 1
+    in_key = 0
+    ev = xml.next(p)
+    while ev != xml.EVENT_EOF {
+        if ev == xml.EVENT_ERROR {
+            ev = xml.EVENT_EOF
+        } else {
+            if ev == xml.EVENT_START {
+                if string.equals(xml.name(p), "Key") == 1 { in_key = 1 }
+            }
+            if ev == xml.EVENT_TEXT {
+                if in_key == 1 {
+                    k = xml.text(p)
+                    if first == 1 { out = string.copy(k)  first = 0 }
+                    else { out = string.concat(out, string.concat("\n", k)) }
+                }
+            }
+            if ev == xml.EVENT_END {
+                in_key = 0
+            }
+            ev = xml.next(p)
+        }
+    }
+    xml.free(p)
     return out
 }
 

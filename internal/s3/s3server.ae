@@ -199,29 +199,24 @@ _delete_objects_impl(req: ptr, res: ptr) {
     data_dir = appstate_get_data_dir()
     body = http.request_body(req)
 
+    // Parse the <Key> list with the std.xml reader (was index_of scanning).
+    keys = s3xml.parse_delete_keys(body)
     out = s3xml.delete_result_open()
-    // extract each <Key>...</Key>
-    rest = body
-    loop_guard = 0
-    while loop_guard < 10000 {
-        ki = string.index_of(rest, "<Key>")
-        if ki < 0 { loop_guard = 10000 }
-        else {
-            tail_x = string.substring(rest, ki + 5, string.length(rest))
-            ke = string.index_of(tail_x, "</Key>")
-            if ke < 0 { loop_guard = 10000 }
-            else {
-                key = string.substring(tail_x, 0, ke)
-                oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, key)
-                if gerr == "" {
-                    objects.object_delete(db, bucket, key)
-                    storage.delete_object(data_dir, sp)
-                }
-                out = string.concat(out, s3xml.delete_result_deleted_xml(key))
-                rest = string.substring(tail_x, ke + 6, string.length(tail_x))
-                loop_guard = loop_guard + 1
+    if string.length(keys) > 0 {
+        parts = string.split(keys, "\n")
+        n = string.array_size(parts)
+        i = 0
+        while i < n {
+            key = string.copy(string.array_get(parts, i))
+            oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, key)
+            if gerr == "" {
+                objects.object_delete(db, bucket, key)
+                storage.delete_object(data_dir, sp)
             }
+            out = string.concat(out, s3xml.delete_result_deleted_xml(key))
+            i = i + 1
         }
+        string.array_free(parts)
     }
     out = string.concat(out, s3xml.delete_result_close())
     http.response_set_status(res, 200)
