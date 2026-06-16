@@ -1,122 +1,19 @@
-// lib.crypto.hmac — HMAC-SHA256 (RFC 2104) in pure Aether.
+// lib.crypto.hmac — constant-time hex comparison.
 //
-// std.cryptography deliberately excludes HMAC, so we build it over
-// its sha256_hex primitive. Block size is 64 bytes (SHA-256). The
-// inner digest is produced as hex by sha256_hex, then hex-decoded to
-// 32 raw bytes for the outer round.
-//
-// Surface:
-//   hmac.sha256_hex(key, key_len, msg, msg_len) -> string   // 64-char hex
-//   hmac.equal_hex(a, b) -> int                              // 1 if equal (constant-time-ish)
+// MODERNIZED (ae 0.260.0): the HMAC-SHA256 implementation that used to
+// live here moved to std.cryptography (hmac_sha256_hex / hmac_sha256_bytes,
+// landed in response to the port's ask #631). All that remains is
+// equal_hex — a constant-time string compare for signature verification,
+// which std doesn't provide (it's not an HMAC, just a timing-safe ==).
+// The module name is kept so `import hmac` call sites are unchanged.
 
-import std.cryptography
-import std.bytes
 import std.string
 
-exports (sha256_hex, sha256_raw, equal_hex)
+exports (equal_hex)
 
-const BLOCK = 64
-const IPAD = 0x36
-const OPAD = 0x5c
-
-// Decode one lowercase/uppercase hex nibble to its 0..15 value.
-_nibble(c: int) -> int {
-    if c >= 48 && c <= 57 { return c - 48 }       // '0'..'9'
-    if c >= 97 && c <= 102 { return c - 97 + 10 } // 'a'..'f'
-    if c >= 65 && c <= 70 { return c - 65 + 10 }  // 'A'..'F'
-    return 0
-}
-
-// Decode a hex string (even length) into a bytes buffer; returns the
-// buffer. Caller owns it and must free or finish it.
-_hex_to_bytes(hex: string) -> ptr {
-    n = string.length(hex)
-    out_len = n / 2
-    buf = bytes.new(out_len)
-    i = 0
-    while i < out_len {
-        hi = _nibble(string.char_at_n(hex, n, i * 2))
-        lo = _nibble(string.char_at_n(hex, n, i * 2 + 1))
-        bytes.set(buf, i, hi * 16 + lo)
-        i = i + 1
-    }
-    return buf
-}
-
-// Build the 64-byte key block: if key longer than BLOCK, replace with
-// SHA-256(key) (32 bytes); then zero-pad to BLOCK. Returned as a bytes
-// buffer of length BLOCK.
-_key_block(key: string, key_len: int) -> ptr {
-    block = bytes.new(BLOCK)
-    // zero-fill
-    z = 0
-    while z < BLOCK {
-        bytes.set(block, z, 0)
-        z = z + 1
-    }
-    if key_len > BLOCK {
-        digest, err = cryptography.sha256_hex(key, key_len)
-        raw = _hex_to_bytes(digest)          // 32 bytes
-        bytes.copy_from_bytes(block, 0, raw, 0, 32)
-        bytes.free(raw)
-    } else {
-        bytes.copy_from_string(block, 0, key, key_len)
-    }
-    return block
-}
-
-// XOR every byte of `block` (length BLOCK) with `pad`, writing the
-// result into a fresh buffer of length BLOCK + extra, leaving `extra`
-// trailing bytes untouched for the caller to fill with the message.
-_xor_block(block: ptr, pad: int, extra: int) -> ptr {
-    out = bytes.new(BLOCK + extra)
-    i = 0
-    while i < BLOCK {
-        b = bytes.get(block, i)
-        // bitwise xor via arithmetic: Aether supports ^ operator
-        bytes.set(out, i, b ^ pad)
-        i = i + 1
-    }
-    return out
-}
-
-// HMAC-SHA256 core, returning the outer digest as a hex string. Key is
-// length-aware (NUL-safe) so a raw-bytes key from a prior HMAC round
-// works — this is what makes the SigV4 signing chain possible.
-sha256_hex(key: string, key_len: int, msg: string, msg_len: int) -> string {
-    block = _key_block(key, key_len)
-
-    // inner = SHA256( (K^ipad) || msg )
-    inner_buf = _xor_block(block, IPAD, msg_len)
-    bytes.copy_from_string(inner_buf, BLOCK, msg, msg_len)
-    inner_str = bytes.finish(inner_buf, BLOCK + msg_len)
-    inner_hex, e1 = cryptography.sha256_hex(inner_str, BLOCK + msg_len)
-    inner_raw = _hex_to_bytes(inner_hex)     // 32 bytes
-
-    // outer = SHA256( (K^opad) || inner )
-    outer_buf = _xor_block(block, OPAD, 32)
-    bytes.copy_from_bytes(outer_buf, BLOCK, inner_raw, 0, 32)
-    outer_str = bytes.finish(outer_buf, BLOCK + 32)
-    outer_hex, e2 = cryptography.sha256_hex(outer_str, BLOCK + 32)
-
-    bytes.free(block)
-    bytes.free(inner_raw)
-    return outer_hex
-}
-
-// HMAC-SHA256 returning the raw 32-byte digest as a length-aware
-// (binary-safe) AetherString plus its length (32). Used to chain
-// SigV4 key derivation, where each round's key is the previous round's
-// raw output. Build the next call's key from this string + length 32.
-sha256_raw(key: string, key_len: int, msg: string, msg_len: int) -> {
-    h = sha256_hex(key, key_len, msg, msg_len)
-    raw = _hex_to_bytes(h)                    // 32-byte buffer
-    s = bytes.finish(raw, 32)                 // owned length-aware string
-    return s, 32
-}
-
-// Constant-time-ish hex string comparison: compares all chars, no
-// early exit on mismatch. Returns 1 if equal, 0 otherwise.
+// Constant-time-ish hex string comparison: compares every char with no
+// early-exit on mismatch. Returns 1 if equal, 0 otherwise. Used to
+// verify signatures/MACs without a timing side channel.
 equal_hex(a: string, b: string) -> int {
     la = string.length(a)
     lb = string.length(b)

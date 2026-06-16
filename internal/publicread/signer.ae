@@ -14,6 +14,7 @@
 //   "invalid"    -> signature mismatch
 
 import std.string
+import std.cryptography
 import hmac
 import urlescape
 
@@ -49,7 +50,8 @@ canonical_string(path: string, expires_unix: long) -> string {
 // SignPath: HMAC-SHA256(secret, canonical) as lowercase hex.
 sign_path(secret: string, path: string, expires_unix: long) -> string {
     canon = canonical_string(path, expires_unix)
-    return hmac.sha256_hex(secret, string.length(secret), canon, string.length(canon))
+    sig, e = cryptography.hmac_sha256_hex(secret, string.length(secret), canon, string.length(canon))
+    return sig
 }
 
 // Verify a signature. `now_unix` is the current time in Unix seconds

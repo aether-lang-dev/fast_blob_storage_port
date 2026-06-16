@@ -215,7 +215,7 @@ multipart_etag(part_etags_joined: string) -> {
         i = i + 1
     }
     string.array_free(parts)
-    final_hex, e = cryptography.hash_hex("md5", combined, total)
+    final_hex, e = cryptography.md5_hex(combined, total)
     if e != "" { return "", e }
     out = string.concat(final_hex, "-")
     out = string.concat(out, string.from_int(n))
