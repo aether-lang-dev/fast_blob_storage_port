@@ -121,22 +121,18 @@ handle_metrics(req: ptr, res: ptr, ud: ptr) {
     }
     db = ctx.db
     bc, oc, ob, uc, auc = management.metrics(db)
-    // Metrics are integer counts/bytes. std.json's num() is float-only
-    // and renders large values in scientific notation (e.g. 5.3e+07),
-    // which would corrupt total_object_bytes — so these stay hand-built
-    // with string.from_int (no escaping concern: all integers).
-    body = "{\"bucket_count\":"
-    body = string.concat(body, string.from_int(bc))
-    body = string.concat(body, ",\"object_count\":")
-    body = string.concat(body, string.from_int(oc))
-    body = string.concat(body, ",\"total_object_bytes\":")
-    body = string.concat(body, string.from_int(ob))
-    body = string.concat(body, ",\"user_count\":")
-    body = string.concat(body, string.from_int(uc))
-    body = string.concat(body, ",\"active_user_count\":")
-    body = string.concat(body, string.from_int(auc))
-    body = string.concat(body, "}")
-    _json(res, 200, body)
+    // MODERNIZED (ae 0.265.0): json.from_int (#628 follow-up, sourced
+    // from this repo's metrics) emits a plain integer — no scientific
+    // notation, full int64 — so metrics now use the std.json encoder
+    // like the rest of the API (was hand-concatenated to dodge num()'s
+    // float-only %g rendering of total_object_bytes).
+    root = json.obj()
+    json.set(root, "bucket_count", json.from_int(bc))
+    json.set(root, "object_count", json.from_int(oc))
+    json.set(root, "total_object_bytes", json.from_int(ob))
+    json.set(root, "user_count", json.from_int(uc))
+    json.set(root, "active_user_count", json.from_int(auc))
+    _json(res, 200, _encode(root))
 }
 
 register_mgmt_routes(server: ptr, ctx: ptr) {
