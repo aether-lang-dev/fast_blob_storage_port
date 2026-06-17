@@ -1,22 +1,33 @@
 // internal.metadata.objects — object repository (port of objects.go).
 //
-// Object fields are passed/returned positionally (no struct-in-tuple).
-// The split-accessor pattern is used for GetByKey: object_get() loads a
-// row into module-level TLS-style holders via a single prepared read,
-// returning the fields as a tuple. List returns a '\n'-joined key list
-// plus an is_truncated flag (the S3 lister re-fetches each object's
-// metadata as needed, matching how the Go handler walks the slice).
+// MODERNIZED (ae 0.269.0): object_get returns a proper (Object, err)
+// tuple. The earlier port used positional 8-tuples because struct-in-
+// tuple-return was first uncompilable (#634) then corrupted string
+// fields (#752); both are fixed now. List still returns a '\n'-joined
+// key string + is_truncated flag (the S3 lister re-fetches each object
+// as needed; a struct-array list return is separate, lower-value work).
 
 import contrib.sqlite
 import std.string
 
 exports (
-    ERR_OBJECT_NOT_FOUND,
+    ERR_OBJECT_NOT_FOUND, Object,
     object_upsert, object_exists, object_get, object_delete,
     object_delete_all_in_bucket, object_list_keys
 )
 
 const ERR_OBJECT_NOT_FOUND = "object not found"
+
+// One object's metadata row.
+struct Object {
+    id: string
+    size: int
+    etag: string
+    content_type: string
+    storage_path: string
+    created_at: string
+    updated_at: string
+}
 
 const UPSERT_SQL = "INSERT INTO objects (id, bucket_name, key, size, etag, content_type, storage_path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, COALESCE(NULLIF(?8,''), CURRENT_TIMESTAMP), COALESCE(NULLIF(?9,''), CURRENT_TIMESTAMP)) ON CONFLICT(bucket_name, key) DO UPDATE SET id=excluded.id, size=excluded.size, etag=excluded.etag, content_type=excluded.content_type, storage_path=excluded.storage_path, updated_at=excluded.updated_at"
 
@@ -57,24 +68,29 @@ object_exists(db: ptr, bucket: string, key: string) -> int {
 // Get an object's metadata. Returns
 // (id, size, etag, content_type, storage_path, created_at, updated_at, err).
 // On miss, err = ERR_OBJECT_NOT_FOUND and the rest are zero/"".
+// Get an object's metadata. Returns (Object, "") or (empty Object, err).
+// On miss, err = ERR_OBJECT_NOT_FOUND.
 object_get(db: ptr, bucket: string, key: string) -> {
+    empty = Object { id: "", size: 0, etag: "", content_type: "", storage_path: "", created_at: "", updated_at: "" }
     stmt, perr = sqlite.prepare(db, "SELECT id, size, etag, content_type, storage_path, created_at, updated_at FROM objects WHERE bucket_name = ?1 AND key = ?2")
-    if perr != "" { return "", 0, "", "", "", "", "", perr }
+    if perr != "" { return empty, perr }
     sqlite.bind_text(stmt, 1, bucket)
     sqlite.bind_text(stmt, 2, key)
     if sqlite.next_row(stmt, db) != 1 {
         sqlite.finalize(stmt)
-        return "", 0, "", "", "", "", "", ERR_OBJECT_NOT_FOUND
+        return empty, ERR_OBJECT_NOT_FOUND
     }
-    id = string.copy(sqlite.column_text(stmt, 0))
-    size = sqlite.column_int(stmt, 1)
-    etag = string.copy(sqlite.column_text(stmt, 2))
-    ct = string.copy(sqlite.column_text(stmt, 3))
-    sp = string.copy(sqlite.column_text(stmt, 4))
-    created = string.copy(sqlite.column_text(stmt, 5))
-    updated = string.copy(sqlite.column_text(stmt, 6))
+    obj = Object {
+        id: string.copy(sqlite.column_text(stmt, 0)),
+        size: sqlite.column_int(stmt, 1),
+        etag: string.copy(sqlite.column_text(stmt, 2)),
+        content_type: string.copy(sqlite.column_text(stmt, 3)),
+        storage_path: string.copy(sqlite.column_text(stmt, 4)),
+        created_at: string.copy(sqlite.column_text(stmt, 5)),
+        updated_at: string.copy(sqlite.column_text(stmt, 6))
+    }
     sqlite.finalize(stmt)
-    return id, size, etag, ct, sp, created, updated, ""
+    return obj, ""
 }
 
 // Delete an object. Returns "" or ERR_OBJECT_NOT_FOUND.

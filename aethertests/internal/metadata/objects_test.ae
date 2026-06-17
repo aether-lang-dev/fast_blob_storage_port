@@ -16,15 +16,15 @@ main() {
     if c1 == "" { ins_ok = 1 }
 
     // get back
-    id, size, etag, ct, sp, cr, up, gerr = objects.object_get(db, "b", "k1.txt")
+    o1, gerr = objects.object_get(db, "b", "k1.txt")
     get_ok = 0
-    if gerr == "" && size == 10 && string.equals(etag, "etag1") == 1 && string.equals(ct, "text/plain") == 1 { get_ok = 1 }
+    if gerr == "" && o1.size == 10 && string.equals(o1.etag, "etag1") == 1 && string.equals(o1.content_type, "text/plain") == 1 { get_ok = 1 }
 
     // upsert overwrite (same bucket/key, new size/etag)
     objects.object_upsert(db, "o2", "b", "k1.txt", 20, "etag2", "", "b/sp2", "", "")
-    _, size2, etag2, _, sp2, _, _, _ = objects.object_get(db, "b", "k1.txt")
+    o2, _ = objects.object_get(db, "b", "k1.txt")
     over_ok = 0
-    if size2 == 20 && string.equals(etag2, "etag2") == 1 && string.equals(sp2, "b/sp2") == 1 { over_ok = 1 }
+    if o2.size == 20 && string.equals(o2.etag, "etag2") == 1 && string.equals(o2.storage_path, "b/sp2") == 1 { over_ok = 1 }
 
     // exists
     ex = objects.object_exists(db, "b", "k1.txt")

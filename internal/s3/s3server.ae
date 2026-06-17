@@ -223,10 +223,10 @@ _delete_objects_impl(ctx: *AppCtx, req: ptr, res: ptr) {
         i = 0
         while i < n {
             key = string.copy(string.array_get(parts, i))
-            oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, key)
+            obj, gerr = objects.object_get(db, bucket, key)
             if gerr == "" {
                 objects.object_delete(db, bucket, key)
-                storage.delete_object(data_dir, sp)
+                storage.delete_object(data_dir, obj.storage_path)
             }
             out = string.concat(out, s3xml.delete_result_deleted_xml(key))
             i = i + 1
@@ -308,7 +308,7 @@ _copy_object_impl(ctx: *AppCtx, req: ptr, res: ptr, copy_source: string) {
     sbucket = string.substring(src, 0, slash)
     skey = string.substring(src, slash + 1, string.length(src))
 
-    soid, ssize, setag, sct, ssp, screated, supdated, sgerr = objects.object_get(db, sbucket, skey)
+    srcobj, sgerr = objects.object_get(db, sbucket, skey)
     if sgerr != "" {
         _send_error(res, 404, "NoSuchKey", "The specified key does not exist.", dpath)
         return
@@ -317,7 +317,7 @@ _copy_object_impl(ctx: *AppCtx, req: ptr, res: ptr, copy_source: string) {
         _send_error(res, 404, "NoSuchBucket", "The specified bucket does not exist.", dpath)
         return
     }
-    data, dlen, rerr = storage.read(data_dir, ssp)
+    data, dlen, rerr = storage.read(data_dir, srcobj.storage_path)
     if rerr != "" {
         _send_error(res, 404, "NoSuchKey", "The specified key does not exist.", dpath)
         return
@@ -329,10 +329,10 @@ _copy_object_impl(ctx: *AppCtx, req: ptr, res: ptr, copy_source: string) {
     }
     etag = _etag(data, dlen)
     oid = _new_uuid()
-    objects.object_upsert(db, oid, dbucket, dkey, nsize, etag, sct, nsp, "", "")
+    objects.object_upsert(db, oid, dbucket, dkey, nsize, etag, srcobj.content_type, nsp, "", "")
     http.response_set_status(res, 200)
     http.response_set_header(res, "Content-Type", "application/xml")
-    http.response_set_body(res, s3xml.copy_object_xml(supdated, etag))
+    http.response_set_body(res, s3xml.copy_object_xml(srcobj.updated_at, etag))
 }
 
 // PUT /:bucket/* — PutObject.
@@ -395,7 +395,7 @@ handle_get_object(req: ptr, res: ptr, ud: ptr) {
     db = ctx.db
     data_dir = ctx.data_dir
 
-    oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, key)
+    obj, gerr = objects.object_get(db, bucket, key)
     if gerr != "" {
         _send_error(res, 404, "NoSuchKey", "The specified key does not exist.", path)
         return
@@ -405,14 +405,14 @@ handle_get_object(req: ptr, res: ptr, ud: ptr) {
     // serve_file derives Content-Type from the (extensionless UUID) file
     // name, so override it + ETag with the stored values afterward
     // (post-serve_file header sets win).
-    full, ferr = storage.resolve_storage_path(data_dir, sp)
+    full, ferr = storage.resolve_storage_path(data_dir, obj.storage_path)
     if ferr != "" {
         _send_error(res, 404, "NoSuchKey", "The specified key does not exist.", path)
         return
     }
     http.serve_file(res, full)
-    qetag = string.concat("\"", string.concat(etag, "\""))
-    http.response_set_header(res, "Content-Type", ct)
+    qetag = string.concat("\"", string.concat(obj.etag, "\""))
+    http.response_set_header(res, "Content-Type", obj.content_type)
     http.response_set_header(res, "ETag", qetag)
 }
 
@@ -425,17 +425,17 @@ handle_head_object(req: ptr, res: ptr, ud: ptr) {
     path = http.request_path(req)
     key = _object_key(path, bucket)
     db = ctx.db
-    oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, key)
+    obj, gerr = objects.object_get(db, bucket, key)
     if gerr != "" {
         http.response_set_status(res, 404)
         http.response_set_body(res, "")
         return
     }
-    qetag = string.concat("\"", string.concat(etag, "\""))
+    qetag = string.concat("\"", string.concat(obj.etag, "\""))
     http.response_set_status(res, 200)
-    http.response_set_header(res, "Content-Type", ct)
+    http.response_set_header(res, "Content-Type", obj.content_type)
     http.response_set_header(res, "ETag", qetag)
-    http.response_set_header(res, "Content-Length", string.from_int(size))
+    http.response_set_header(res, "Content-Length", string.from_int(obj.size))
     http.response_set_body(res, "")
 }
 
@@ -465,10 +465,10 @@ _delete_object_impl(ctx: *AppCtx, req: ptr, res: ptr) {
     db = ctx.db
     data_dir = ctx.data_dir
 
-    oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, key)
+    obj, gerr = objects.object_get(db, bucket, key)
     if gerr == "" {
         objects.object_delete(db, bucket, key)
-        storage.delete_object(data_dir, sp)
+        storage.delete_object(data_dir, obj.storage_path)
     }
     http.response_set_status(res, 204)
     http.response_set_body(res, "")
@@ -663,8 +663,8 @@ handle_list_objects(req: ptr, res: ptr, ud: ptr) {
         i = 0
         while i < n {
             k = string.copy(string.array_get(parts, i))
-            oid, size, etag, ct, sp, created, updated, gerr = objects.object_get(db, bucket, k)
-            contents = string.concat(contents, s3xml.list_bucket_contents_xml(k, updated, etag, size))
+            obj, gerr = objects.object_get(db, bucket, k)
+            contents = string.concat(contents, s3xml.list_bucket_contents_xml(k, obj.updated_at, obj.etag, obj.size))
             count = count + 1
             i = i + 1
         }
