@@ -64,6 +64,21 @@ package dir so the `internal/` import is allowed) and assert against it.
 
 ## Status
 
+**Aether-only + modernized onto std (ae 0.269.0).** The Go tree is gone;
+the repo leans on stdlib that landed in response to its own asks. Notable:
+- Randomness from std.cryptography CSPRNG + std.uuid (no clock-seeded PRNG).
+- HMAC/MD5/SigV4 on std.cryptography; lib/crypto/hmac is just equal_hex.
+- Lexical paths via std.fs.clean/is_within_base; URL via std.url; XML via
+  std.xml; JSON responses via std.json (incl. json.from_int for metrics).
+- Per-server state via std.http user_data (no C shim — repo is 0 hand C).
+- GET via http.serve_file (sendfile); PUT streams via request_body_read.
+- object_get returns (Object, err) (struct-in-tuple works since #634/#752).
+
+Idle RSS ~7.5 MB. Both hot-path sides (up/download) are now RAM-bounded.
+
+### Original port status
+
+
 **Migration complete.** The repo is Aether-only — the Go tree (93 files,
 go.mod/go.sum) was removed once the port reached parity. Ported: storage,
 metadata (6 repos), auth (bearer + SigV4), s3 (full object lifecycle,
