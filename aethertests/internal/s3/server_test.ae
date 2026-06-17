@@ -184,6 +184,20 @@ main() {
     st_bulk_gone = client.response_status(rchk)
     client.response_free(rchk)
 
+    // --- large object: exercise the streaming (>16KiB) upload path ---
+    big = ""
+    bi = 0
+    while bi < 20000 { big = string.concat(big, "0123456789")  bi = bi + 1 }   // 200 KB
+    rbig = _req("PUT", port, "/mybucket/big.bin", big)
+    st_big_put = client.response_status(rbig)
+    client.response_free(rbig)
+    rbigg = _req("GET", port, "/mybucket/big.bin", "")
+    st_big_get = client.response_status(rbigg)
+    big_body = string.copy(client.response_body(rbigg))
+    big_ok = 0
+    if string.equals(big_body, big) == 1 { big_ok = 1 }
+    client.response_free(rbigg)
+
     http.server_stop(s)
 
     aeocha.describe(fw, "s3 server end-to-end") {
@@ -225,6 +239,11 @@ main() {
         aeocha.it("copy object") callback {
             aeocha.assert_eq(fw, st_copy, 200, "200 copy")
             aeocha.assert_eq(fw, copy_ok, 1, "copy body matches source")
+        }
+        aeocha.it("large object streams + roundtrips") callback {
+            aeocha.assert_eq(fw, st_big_put, 200, "200 big put")
+            aeocha.assert_eq(fw, st_big_get, 200, "200 big get")
+            aeocha.assert_eq(fw, big_ok, 1, "200KB body byte-identical")
         }
         aeocha.it("bulk delete") callback {
             aeocha.assert_eq(fw, st_bulk, 200, "200 bulk delete")

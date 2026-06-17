@@ -42,13 +42,16 @@ extern file_delete_raw(path: string) -> int
 extern dir_list_count(list: ptr) -> int
 extern dir_list_get(list: ptr, index: int) -> string
 extern dir_list_free(list: ptr)
+extern file_open_raw(path: string, mode: string) -> ptr
+extern file_close(file: ptr) -> int
 
 exports (
     ERR_NOT_FOUND, ERR_INVALID_KEY, ERR_PATH_TRAVERSAL,
     new, validate_key, storage_path,
     resolve_key_path, resolve_storage_path,
     write, read, delete_object,
-    write_part, assemble_parts, delete_upload_parts
+    write_part, assemble_parts, delete_upload_parts,
+    stream_begin, stream_write, stream_finish
 )
 
 const ERR_NOT_FOUND      = "storage: file not found"
@@ -211,6 +214,49 @@ resolve_storage_path(data_dir: string, sp: string) -> {
         return "", ERR_PATH_TRAVERSAL
     }
     return full, ""
+}
+
+// --- streaming write (chunked upload, #626) ---
+
+// Open a new UUID-named object file for streaming writes. Validates
+// bucket/key, ensures the bucket dir, opens the final path for writing.
+// Returns (file, storage_path, "") or (null, "", err). The caller writes
+// chunks with stream_write and then stream_finish; the metadata insert
+// downstream is still the commit point (a half-written file with no row
+// is reaped by reconcile).
+stream_begin(data_dir: string, bucket: string, key: string) -> {
+    sp_check, full_check, rerr = resolve_key_path(data_dir, bucket, key)
+    if rerr != "" {
+        return null, "", rerr
+    }
+    sp = pathutil.join(bucket, _new_uuid())
+    full = pathutil.join(data_dir, sp)
+    if pathutil.is_within_base(data_dir, full) == 0 {
+        return null, "", ERR_PATH_TRAVERSAL
+    }
+    derr = fs.mkdir_p(path_dirname(full))
+    if derr != "" {
+        return null, "", derr
+    }
+    file = file_open_raw(full, "w")
+    if file == null {
+        return null, "", "storage: open for write failed"
+    }
+    return file, sp, ""
+}
+
+// Append `length` bytes of `data` at `offset` to a streaming file.
+// Returns "" or error.
+stream_write(file: ptr, data: string, length: int, offset: long) -> string {
+    n, err = fs.pwrite(file, data, length, offset)
+    return err
+}
+
+// Flush + close a streaming file. Returns "" or error.
+stream_finish(file: ptr) -> string {
+    ferr = fs.fsync(file)
+    file_close(file)
+    return ferr
 }
 
 // --- write / read / delete ---
