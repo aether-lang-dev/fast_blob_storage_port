@@ -353,13 +353,15 @@ _put_object_impl(ctx: *AppCtx, req: ptr, res: ptr) {
     }
 
     // Stream the body to disk in bounded windows (#626 upload half) — the
-    // object never sits whole in RAM during receive. For bodies over the
-    // server's 16 KiB buffer the windows come straight off the socket.
+    // object never sits whole in RAM during receive — AND md5 each window
+    // as it goes via an incremental digest (#0.278), so the ETag needs no
+    // read-the-whole-object-back pass. Genuinely single-pass upload.
     file, sp, berr = storage.stream_begin(data_dir, bucket, key)
     if berr != "" {
         _send_error(res, 400, "InvalidRequest", berr, path)
         return
     }
+    dctx, dnerr = cryptography.digest_new("md5")
     total = http.request_body_length(req)
     off = 0
     wok = 1
@@ -371,31 +373,26 @@ _put_object_impl(ctx: *AppCtx, req: ptr, res: ptr) {
             else {
                 werr = storage.stream_write(file, chunk, n, off)
                 if werr != "" { wok = 0  off = total }
-                else { off = off + n }
+                else {
+                    cryptography.digest_update(dctx, chunk, n)
+                    off = off + n
+                }
             }
         }
     }
     storage.stream_finish(file)
     if wok == 0 {
+        cryptography.digest_free(dctx)
         storage.delete_object(data_dir, sp)
         _send_error(res, 500, "InternalError", "write failed", path)
         return
     }
 
-    // ETag = md5 of the stored object. No incremental MD5 in std, so read
-    // the file back once (sequential, per-request — not held across the
-    // concurrent uploads that drove the load-memory peak).
-    data, dlen, drerr = storage.read(data_dir, sp)
-    if drerr != "" {
-        storage.delete_object(data_dir, sp)
-        _send_error(res, 500, "InternalError", "Internal error.", path)
-        return
-    }
-    etag = _etag(data, dlen)
+    etag = cryptography.digest_final_hex(dctx)!
     ct = http.get_header(req, "Content-Type")
     if ct == null { ct = "" }
     oid = uuid.v4()!
-    uerr = objects.object_upsert(db, oid, bucket, key, dlen, etag, ct, sp, "", "")
+    uerr = objects.object_upsert(db, oid, bucket, key, off, etag, ct, sp, "", "")
     if uerr != "" {
         storage.delete_object(data_dir, sp)
         _send_error(res, 500, "InternalError", "Internal error.", path)

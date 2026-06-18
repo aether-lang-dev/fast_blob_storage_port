@@ -81,7 +81,10 @@ main() {
     // 3. put object
     rp = _req("PUT", port, "/mybucket/hello.txt", "Hello, Aether S3!")
     st_put = client.response_status(rp)
-    etag_hdr = client.response_header(rp, "ETag")
+    etag_hdr = string.copy(client.response_header(rp, "ETag"))
+    // md5("Hello, Aether S3!") — proves the incremental digest is correct
+    etag_ok = 0
+    if string.equals(etag_hdr, "\"0f913c36c88a430584c253e987d5793c\"") == 1 { etag_ok = 1 }
     client.response_free(rp)
 
     // 4. get object
@@ -205,6 +208,7 @@ main() {
         }
         aeocha.it("put object returns ETag") callback {
             aeocha.assert_eq(fw, st_put, 200, "200 put")
+            aeocha.assert_eq(fw, etag_ok, 1, "ETag is md5 of body (incremental digest)")
         }
         aeocha.it("get object returns body") callback {
             aeocha.assert_eq(fw, st_get, 200, "200 get")
