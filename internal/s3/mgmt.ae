@@ -22,10 +22,6 @@ import region
 import std.uuid
 import s3server (AppCtx)
 
-_new_uuid() -> string {
-    u, e = uuid.v4()
-    return u
-}
 
 exports (register_mgmt_routes)
 
@@ -92,7 +88,7 @@ handle_bootstrap(req: ptr, res: ptr, ud: ptr) {
     }
     ak, raw, hash = tokens.issue_bearer()
     sak, ssecret = tokens.issue_sigv4()
-    uid = _new_uuid()
+    uid = uuid.v4()!
     cerr = users.user_insert(db, uid, "Initial Admin", ak, hash, sak, ssecret, "admin", 1, "", "")
     if cerr != "" {
         _json(res, 500, _error_json("failed to create admin"))

@@ -20,8 +20,7 @@ const SIGV4_PREFIX  = "fbsv4_"
 // healthy host) error slot; an empty string would surface downstream as
 // a rejected credential rather than a silent weak one.
 _rand_hex(n: int) -> string {
-    h, e = cryptography.random_hex(n)
-    return h
+    return cryptography.random_hex(n)!
 }
 
 // Returns (access_key_id, raw_token, secret_hash). raw_token is shown to

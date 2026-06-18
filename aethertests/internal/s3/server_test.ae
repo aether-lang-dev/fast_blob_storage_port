@@ -13,10 +13,6 @@ import contrib.sqlite
 import std.string
 import std.cryptography
 
-_hex(n: int) -> string {
-    h, e = cryptography.random_hex(n)
-    return h
-}
 import multipart
 
 extern http_server_start_background_raw(server: ptr) -> int
@@ -59,7 +55,7 @@ main() {
     hash = auth.hash_secret("secretvalue")
     users.user_insert(db, "u1", "Admin", "AKIATEST", hash, "", "", "admin", 1, "", "")
 
-    data_dir = string.concat("/tmp/fbs_s3srv_", _hex(6))
+    data_dir = string.concat("/tmp/fbs_s3srv_", cryptography.random_hex(6)!)
 
     s = http.server_create(0)
     http.server_set_host(s, "127.0.0.1")

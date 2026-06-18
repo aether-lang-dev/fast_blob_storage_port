@@ -20,10 +20,6 @@ import s3xml
 import region
 import std.uuid
 
-_new_uuid() -> string {
-    u, e = uuid.v4()
-    return u
-}
 import multipart
 import std.collections (*)
 
@@ -55,8 +51,7 @@ set_state(db: ptr, data_dir: string) -> ptr {
 
 // md5 hex of a length-aware body.
 _etag(body: string, length: int) -> string {
-    h, e = cryptography.md5_hex(body, length)
-    return h
+    return cryptography.md5_hex(body, length)!
 }
 
 _send_error(res: ptr, status: int, code: string, msg: string, resource: string) {
@@ -328,7 +323,7 @@ _copy_object_impl(ctx: *AppCtx, req: ptr, res: ptr, copy_source: string) {
         return
     }
     etag = _etag(data, dlen)
-    oid = _new_uuid()
+    oid = uuid.v4()!
     objects.object_upsert(db, oid, dbucket, dkey, nsize, etag, srcobj.content_type, nsp, "", "")
     http.response_set_status(res, 200)
     http.response_set_header(res, "Content-Type", "application/xml")
@@ -399,7 +394,7 @@ _put_object_impl(ctx: *AppCtx, req: ptr, res: ptr) {
     etag = _etag(data, dlen)
     ct = http.get_header(req, "Content-Type")
     if ct == null { ct = "" }
-    oid = _new_uuid()
+    oid = uuid.v4()!
     uerr = objects.object_upsert(db, oid, bucket, key, dlen, etag, ct, sp, "", "")
     if uerr != "" {
         storage.delete_object(data_dir, sp)
@@ -539,7 +534,7 @@ _create_mpu_impl(ctx: *AppCtx, req: ptr, res: ptr) {
         _send_error(res, 404, "NoSuchBucket", "The specified bucket does not exist.", path)
         return
     }
-    upid = _new_uuid()
+    upid = uuid.v4()!
     ct = http.get_header(req, "Content-Type")
     if ct == null { ct = "" }
     cerr = multipart.mpu_create(db, upid, bucket, key, ct)
@@ -640,7 +635,7 @@ _complete_mpu_impl(ctx: *AppCtx, req: ptr, res: ptr, upload_id: string) {
     // ETag = md5 of assembled object (simplified; Go uses md5-of-md5s).
     data, dlen, rerr = storage.read(data_dir, sp)
     etag = _etag(data, dlen)
-    oid = _new_uuid()
+    oid = uuid.v4()!
     objects.object_upsert(db, oid, bucket, key, total, etag, ct, sp, "", "")
     // cleanup parts + upload record
     multipart.mpu_delete(db, upload_id)
