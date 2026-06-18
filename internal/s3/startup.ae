@@ -10,7 +10,6 @@ import std.string
 import std.fs
 import contrib.sqlite
 import objects
-import pathutil
 
 exports (reconcile)
 
@@ -41,7 +40,7 @@ _known_paths(db: ptr, bucket: string) -> string {
 // the first error.
 reconcile(db: ptr, data_dir: string) -> string {
     // 1. purge .tmp (except multipart)
-    tmp = pathutil.join(data_dir, ".tmp")
+    tmp = fs.join_clean(data_dir, ".tmp")
     if dir_exists(tmp) == 1 {
         _purge_tmp(tmp)
     }
@@ -53,7 +52,7 @@ reconcile(db: ptr, data_dir: string) -> string {
     i = 0
     while i < cnt {
         name = dir_list_get(list, i)
-        full = pathutil.join(data_dir, name)
+        full = fs.join_clean(data_dir, name)
         is_tmp = string.equals(name, ".tmp")
         if dir_exists(full) == 1 && is_tmp == 0 {
             _sweep_bucket(db, data_dir, name)
@@ -68,17 +67,17 @@ reconcile(db: ptr, data_dir: string) -> string {
 // files sit directly under the bucket dir with UUID names).
 _sweep_bucket(db: ptr, data_dir: string, bucket: string) {
     known = _known_paths(db, bucket)
-    bdir = pathutil.join(data_dir, bucket)
+    bdir = fs.join_clean(data_dir, bucket)
     list, lerr = fs.list_dir(bdir)
     if lerr != "" { return }
     cnt = dir_list_count(list)
     i = 0
     while i < cnt {
         fname = dir_list_get(list, i)
-        sp = pathutil.join(bucket, fname)
+        sp = fs.join_clean(bucket, fname)
         needle = string.concat("\n", string.concat(sp, "\n"))
         if string.contains(known, needle) == 0 {
-            full = pathutil.join(bdir, fname)
+            full = fs.join_clean(bdir, fname)
             if dir_exists(full) == 0 {
                 file_delete_raw(full)
             }
@@ -96,7 +95,7 @@ _purge_tmp(tmp: string) {
     i = 0
     while i < cnt {
         name = dir_list_get(list, i)
-        full = pathutil.join(tmp, name)
+        full = fs.join_clean(tmp, name)
         is_mp = string.equals(name, "multipart")
         if is_mp == 0 {
             if dir_exists(full) == 0 {

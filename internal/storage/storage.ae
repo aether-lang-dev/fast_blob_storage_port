@@ -16,7 +16,6 @@ import std.fs
 import std.collections (*)
 import std.uuid
 import std.cryptography
-import pathutil
 
 // Raw fs externs the qualified `fs.` wrappers don't expose. Declared
 // locally because `import std.fs (*)` mis-types the tuple-returning
@@ -61,7 +60,7 @@ new(data_dir: string) -> {
     if e1 != "" {
         return "", e1
     }
-    tmp = pathutil.join(dir, ".tmp")
+    tmp = fs.join_clean(dir, ".tmp")
     e2 = fs.mkdir_p(tmp)
     if e2 != "" {
         return "", e2
@@ -71,7 +70,7 @@ new(data_dir: string) -> {
 
 // tmp dir for a data_dir.
 _tmp_dir(data_dir: string) -> string {
-    return pathutil.join(data_dir, ".tmp")
+    return fs.join_clean(data_dir, ".tmp")
 }
 
 // --- key validation (security-critical; mirror Go ValidateKey) ---
@@ -152,7 +151,7 @@ validate_key(key: string) -> string {
     if _contains_traversal_segment(key) == 1 {
         return ERR_PATH_TRAVERSAL
     }
-    cleaned = pathutil.clean(key)
+    cleaned = fs.clean(key)
     if string.equals(cleaned, ".") == 1 {
         return ERR_INVALID_KEY
     }
@@ -164,7 +163,7 @@ validate_key(key: string) -> string {
 
 // storage_path(bucket, key) = join(bucket, clean(key))
 storage_path(data_dir: string, bucket: string, key: string) -> string {
-    return pathutil.join(bucket, pathutil.clean(key))
+    return fs.join_clean(bucket, fs.clean(key))
 }
 
 // resolve_key_path: validate, compute storage path + absolute full path,
@@ -180,8 +179,8 @@ resolve_key_path(data_dir: string, bucket: string, key: string) -> {
         return "", "", verr
     }
     sp = storage_path(data_dir, b, key)
-    full = pathutil.join(data_dir, sp)
-    if pathutil.is_within_base(data_dir, full) == 0 {
+    full = fs.join_clean(data_dir, sp)
+    if fs.is_within_base(data_dir, full) == 0 {
         return "", "", ERR_PATH_TRAVERSAL
     }
     return sp, full, ""
@@ -196,9 +195,9 @@ resolve_storage_path(data_dir: string, sp: string) -> {
     if path_is_absolute(sp) == 1 {
         return "", ERR_INVALID_KEY
     }
-    cleaned = pathutil.clean(sp)
-    full = pathutil.join(data_dir, cleaned)
-    if pathutil.is_within_base(data_dir, full) == 0 {
+    cleaned = fs.clean(sp)
+    full = fs.join_clean(data_dir, cleaned)
+    if fs.is_within_base(data_dir, full) == 0 {
         return "", ERR_PATH_TRAVERSAL
     }
     return full, ""
@@ -217,9 +216,9 @@ stream_begin(data_dir: string, bucket: string, key: string) -> {
     if rerr != "" {
         return null, "", rerr
     }
-    sp = pathutil.join(bucket, uuid.v4()!)
-    full = pathutil.join(data_dir, sp)
-    if pathutil.is_within_base(data_dir, full) == 0 {
+    sp = fs.join_clean(bucket, uuid.v4()!)
+    full = fs.join_clean(data_dir, sp)
+    if fs.is_within_base(data_dir, full) == 0 {
         return null, "", ERR_PATH_TRAVERSAL
     }
     derr = fs.mkdir_p(path_dirname(full))
@@ -258,9 +257,9 @@ write(data_dir: string, bucket: string, key: string, data: string, length: int) 
     if rerr != "" {
         return "", 0, rerr
     }
-    sp = pathutil.join(bucket, uuid.v4()!)
-    full = pathutil.join(data_dir, sp)
-    if pathutil.is_within_base(data_dir, full) == 0 {
+    sp = fs.join_clean(bucket, uuid.v4()!)
+    full = fs.join_clean(data_dir, sp)
+    if fs.is_within_base(data_dir, full) == 0 {
         return "", 0, ERR_PATH_TRAVERSAL
     }
     // ensure the bucket dir exists
@@ -330,8 +329,8 @@ _validate_upload_id(upload_id: string) -> string {
 
 // Directory holding parts for an upload: data_dir/.tmp/multipart/<id>.
 _part_dir(data_dir: string, upload_id: string) -> string {
-    mp = pathutil.join(_tmp_dir(data_dir), "multipart")
-    return pathutil.join(mp, upload_id)
+    mp = fs.join_clean(_tmp_dir(data_dir), "multipart")
+    return fs.join_clean(mp, upload_id)
 }
 
 // Write one multipart part. Returns (storage_path, size, "") or
@@ -349,15 +348,15 @@ write_part(data_dir: string, upload_id: string, part_number: int, data: string, 
     }
     pn = string.from_int(part_number)
     fname = string.concat(pn, string.concat(".", cryptography.random_hex(8)!))
-    full = pathutil.join(part_dir, fname)
+    full = fs.join_clean(part_dir, fname)
     werr = fs.write_atomic(full, data, length)
     if werr != "" {
         return "", 0, werr
     }
     // storage path relative to data_dir
-    rel = pathutil.join(".tmp", "multipart")
-    rel = pathutil.join(rel, upload_id)
-    rel = pathutil.join(rel, fname)
+    rel = fs.join_clean(".tmp", "multipart")
+    rel = fs.join_clean(rel, upload_id)
+    rel = fs.join_clean(rel, fname)
     return rel, length, ""
 }
 
@@ -370,9 +369,9 @@ assemble_parts(data_dir: string, bucket: string, key: string, part_full_paths: p
     if verr != "" {
         return "", 0, verr
     }
-    sp = pathutil.join(bucket, uuid.v4()!)
-    full = pathutil.join(data_dir, sp)
-    if pathutil.is_within_base(data_dir, full) == 0 {
+    sp = fs.join_clean(bucket, uuid.v4()!)
+    full = fs.join_clean(data_dir, sp)
+    if fs.is_within_base(data_dir, full) == 0 {
         return "", 0, ERR_PATH_TRAVERSAL
     }
     // Concatenate all parts into one buffer.
@@ -429,7 +428,7 @@ _remove_tree(dir: string) -> string {
     i = 0
     while i < cnt {
         name = dir_list_get(list, i)
-        child = pathutil.join(dir, name)
+        child = fs.join_clean(dir, name)
         if dir_exists(child) == 1 {
             _remove_tree(child)
         } else {
