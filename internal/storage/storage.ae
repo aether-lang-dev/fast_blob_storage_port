@@ -12,25 +12,11 @@
 //  - The engine is a struct carrying data_dir + tmp_dir.
 
 import std.string
-import std.fs
+import std.fs (*)
 import std.collections (*)
 import std.uuid
 import std.cryptography
 
-// Raw fs externs the qualified `fs.` wrappers don't expose. Declared
-// locally because `import std.fs (*)` mis-types the tuple-returning
-// wrappers; the wrappers are reached via `fs.<name>` and these bare
-// externs via the unqualified names below.
-extern path_dirname(path: string) -> string
-extern path_is_absolute(path: string) -> int
-extern dir_exists(path: string) -> int
-extern fs_path_exists(path: string) -> int
-extern file_delete_raw(path: string) -> int
-extern dir_list_count(list: ptr) -> int
-extern dir_list_get(list: ptr, index: int) -> string
-extern dir_list_free(list: ptr)
-extern file_open_raw(path: string, mode: string) -> ptr
-extern file_close(file: ptr) -> int
 
 exports (
     ERR_NOT_FOUND, ERR_INVALID_KEY, ERR_PATH_TRAVERSAL,
@@ -56,12 +42,12 @@ new(data_dir: string) -> {
     if string.length(dir) == 0 {
         dir = "./data"
     }
-    e1 = fs.mkdir_p(dir)
+    e1 = mkdir_p(dir)
     if e1 != "" {
         return "", e1
     }
-    tmp = fs.join_clean(dir, ".tmp")
-    e2 = fs.mkdir_p(tmp)
+    tmp = join_clean(dir, ".tmp")
+    e2 = mkdir_p(tmp)
     if e2 != "" {
         return "", e2
     }
@@ -70,7 +56,7 @@ new(data_dir: string) -> {
 
 // tmp dir for a data_dir.
 _tmp_dir(data_dir: string) -> string {
-    return fs.join_clean(data_dir, ".tmp")
+    return join_clean(data_dir, ".tmp")
 }
 
 // --- key validation (security-critical; mirror Go ValidateKey) ---
@@ -151,7 +137,7 @@ validate_key(key: string) -> string {
     if _contains_traversal_segment(key) == 1 {
         return ERR_PATH_TRAVERSAL
     }
-    cleaned = fs.clean(key)
+    cleaned = clean(key)
     if string.equals(cleaned, ".") == 1 {
         return ERR_INVALID_KEY
     }
@@ -163,7 +149,7 @@ validate_key(key: string) -> string {
 
 // storage_path(bucket, key) = join(bucket, clean(key))
 storage_path(data_dir: string, bucket: string, key: string) -> string {
-    return fs.join_clean(bucket, fs.clean(key))
+    return join_clean(bucket, clean(key))
 }
 
 // resolve_key_path: validate, compute storage path + absolute full path,
@@ -179,8 +165,8 @@ resolve_key_path(data_dir: string, bucket: string, key: string) -> {
         return "", "", verr
     }
     sp = storage_path(data_dir, b, key)
-    full = fs.join_clean(data_dir, sp)
-    if fs.is_within_base(data_dir, full) == 0 {
+    full = join_clean(data_dir, sp)
+    if is_within_base(data_dir, full) == 0 {
         return "", "", ERR_PATH_TRAVERSAL
     }
     return sp, full, ""
@@ -195,9 +181,9 @@ resolve_storage_path(data_dir: string, sp: string) -> {
     if path_is_absolute(sp) == 1 {
         return "", ERR_INVALID_KEY
     }
-    cleaned = fs.clean(sp)
-    full = fs.join_clean(data_dir, cleaned)
-    if fs.is_within_base(data_dir, full) == 0 {
+    cleaned = clean(sp)
+    full = join_clean(data_dir, cleaned)
+    if is_within_base(data_dir, full) == 0 {
         return "", ERR_PATH_TRAVERSAL
     }
     return full, ""
@@ -216,12 +202,12 @@ stream_begin(data_dir: string, bucket: string, key: string) -> {
     if rerr != "" {
         return null, "", rerr
     }
-    sp = fs.join_clean(bucket, uuid.v4()!)
-    full = fs.join_clean(data_dir, sp)
-    if fs.is_within_base(data_dir, full) == 0 {
+    sp = join_clean(bucket, uuid.v4()!)
+    full = join_clean(data_dir, sp)
+    if is_within_base(data_dir, full) == 0 {
         return null, "", ERR_PATH_TRAVERSAL
     }
-    derr = fs.mkdir_p(path_dirname(full))
+    derr = mkdir_p(path_dirname(full))
     if derr != "" {
         return null, "", derr
     }
@@ -235,13 +221,13 @@ stream_begin(data_dir: string, bucket: string, key: string) -> {
 // Append `length` bytes of `data` at `offset` to a streaming file.
 // Returns "" or error.
 stream_write(file: ptr, data: string, length: int, offset: long) -> string {
-    n, err = fs.pwrite(file, data, length, offset)
+    n, err = pwrite(file, data, length, offset)
     return err
 }
 
 // Flush + close a streaming file. Returns "" or error.
 stream_finish(file: ptr) -> string {
-    ferr = fs.fsync(file)
+    ferr = fsync(file)
     file_close(file)
     return ferr
 }
@@ -257,18 +243,18 @@ write(data_dir: string, bucket: string, key: string, data: string, length: int) 
     if rerr != "" {
         return "", 0, rerr
     }
-    sp = fs.join_clean(bucket, uuid.v4()!)
-    full = fs.join_clean(data_dir, sp)
-    if fs.is_within_base(data_dir, full) == 0 {
+    sp = join_clean(bucket, uuid.v4()!)
+    full = join_clean(data_dir, sp)
+    if is_within_base(data_dir, full) == 0 {
         return "", 0, ERR_PATH_TRAVERSAL
     }
     // ensure the bucket dir exists
     bucket_dir = path_dirname(full)
-    derr = fs.mkdir_p(bucket_dir)
+    derr = mkdir_p(bucket_dir)
     if derr != "" {
         return "", 0, derr
     }
-    werr = fs.write_atomic(full, data, length)
+    werr = write_atomic(full, data, length)
     if werr != "" {
         return "", 0, werr
     }
@@ -285,7 +271,7 @@ read(data_dir: string, sp: string) -> {
     if fs_path_exists(full) == 0 {
         return "", 0, ERR_NOT_FOUND
     }
-    data, length, err = fs.read_binary(full)
+    data, length, err = read_binary(full)
     if err != "" {
         return "", 0, err
     }
@@ -329,8 +315,8 @@ _validate_upload_id(upload_id: string) -> string {
 
 // Directory holding parts for an upload: data_dir/.tmp/multipart/<id>.
 _part_dir(data_dir: string, upload_id: string) -> string {
-    mp = fs.join_clean(_tmp_dir(data_dir), "multipart")
-    return fs.join_clean(mp, upload_id)
+    mp = join_clean(_tmp_dir(data_dir), "multipart")
+    return join_clean(mp, upload_id)
 }
 
 // Write one multipart part. Returns (storage_path, size, "") or
@@ -342,21 +328,21 @@ write_part(data_dir: string, upload_id: string, part_number: int, data: string, 
         return "", 0, verr
     }
     part_dir = _part_dir(data_dir, upload_id)
-    derr = fs.mkdir_p(part_dir)
+    derr = mkdir_p(part_dir)
     if derr != "" {
         return "", 0, derr
     }
     pn = string.from_int(part_number)
     fname = string.concat(pn, string.concat(".", cryptography.random_hex(8)!))
-    full = fs.join_clean(part_dir, fname)
-    werr = fs.write_atomic(full, data, length)
+    full = join_clean(part_dir, fname)
+    werr = write_atomic(full, data, length)
     if werr != "" {
         return "", 0, werr
     }
     // storage path relative to data_dir
-    rel = fs.join_clean(".tmp", "multipart")
-    rel = fs.join_clean(rel, upload_id)
-    rel = fs.join_clean(rel, fname)
+    rel = join_clean(".tmp", "multipart")
+    rel = join_clean(rel, upload_id)
+    rel = join_clean(rel, fname)
     return rel, length, ""
 }
 
@@ -369,9 +355,9 @@ assemble_parts(data_dir: string, bucket: string, key: string, part_full_paths: p
     if verr != "" {
         return "", 0, verr
     }
-    sp = fs.join_clean(bucket, uuid.v4()!)
-    full = fs.join_clean(data_dir, sp)
-    if fs.is_within_base(data_dir, full) == 0 {
+    sp = join_clean(bucket, uuid.v4()!)
+    full = join_clean(data_dir, sp)
+    if is_within_base(data_dir, full) == 0 {
         return "", 0, ERR_PATH_TRAVERSAL
     }
     // Concatenate all parts into one buffer.
@@ -384,7 +370,7 @@ assemble_parts(data_dir: string, bucket: string, key: string, part_full_paths: p
         if perr != "" {
             return "", 0, perr
         }
-        pdata, plen, rerr = fs.read_binary(pfull)
+        pdata, plen, rerr = read_binary(pfull)
         if rerr != "" {
             return "", 0, rerr
         }
@@ -393,11 +379,11 @@ assemble_parts(data_dir: string, bucket: string, key: string, part_full_paths: p
         i = i + 1
     }
     bucket_dir = path_dirname(full)
-    derr = fs.mkdir_p(bucket_dir)
+    derr = mkdir_p(bucket_dir)
     if derr != "" {
         return "", 0, derr
     }
-    werr = fs.write_atomic(full, combined, total)
+    werr = write_atomic(full, combined, total)
     if werr != "" {
         return "", 0, werr
     }
@@ -419,16 +405,16 @@ delete_upload_parts(data_dir: string, upload_id: string) -> string {
 
 // Recursively remove a directory tree (files then dirs).
 _remove_tree(dir: string) -> string {
-    list, lerr = fs.list_dir(dir)
+    list, lerr = list_dir(dir)
     if lerr != "" {
         // already gone or unreadable; try a plain rmdir
-        return fs.delete_dir(dir)
+        return delete_dir(dir)
     }
     cnt = dir_list_count(list)
     i = 0
     while i < cnt {
         name = dir_list_get(list, i)
-        child = fs.join_clean(dir, name)
+        child = join_clean(dir, name)
         if dir_exists(child) == 1 {
             _remove_tree(child)
         } else {
@@ -437,5 +423,5 @@ _remove_tree(dir: string) -> string {
         i = i + 1
     }
     dir_list_free(list)
-    return fs.delete_dir(dir)
+    return delete_dir(dir)
 }

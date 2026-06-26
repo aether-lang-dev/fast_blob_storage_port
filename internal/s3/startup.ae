@@ -7,18 +7,12 @@
 //      not present in the objects table (orphans from crashed writes)
 
 import std.string
-import std.fs
+import std.fs (*)
 import contrib.sqlite
 import objects
 
 exports (reconcile)
 
-extern dir_exists(path: string) -> int
-extern fs_path_exists(path: string) -> int
-extern file_delete_raw(path: string) -> int
-extern dir_list_count(list: ptr) -> int
-extern dir_list_get(list: ptr, index: int) -> string
-extern dir_list_free(list: ptr)
 
 // Build the set of known storage_paths for a bucket as a '\n'-joined
 // string we can membership-test with substring matching against a
@@ -40,19 +34,19 @@ _known_paths(db: ptr, bucket: string) -> string {
 // the first error.
 reconcile(db: ptr, data_dir: string) -> string {
     // 1. purge .tmp (except multipart)
-    tmp = fs.join_clean(data_dir, ".tmp")
+    tmp = join_clean(data_dir, ".tmp")
     if dir_exists(tmp) == 1 {
         _purge_tmp(tmp)
     }
 
     // 2. per-bucket orphan sweep
-    list, lerr = fs.list_dir(data_dir)
+    list, lerr = list_dir(data_dir)
     if lerr != "" { return "" }
     cnt = dir_list_count(list)
     i = 0
     while i < cnt {
         name = dir_list_get(list, i)
-        full = fs.join_clean(data_dir, name)
+        full = join_clean(data_dir, name)
         is_tmp = string.equals(name, ".tmp")
         if dir_exists(full) == 1 && is_tmp == 0 {
             _sweep_bucket(db, data_dir, name)
@@ -67,17 +61,17 @@ reconcile(db: ptr, data_dir: string) -> string {
 // files sit directly under the bucket dir with UUID names).
 _sweep_bucket(db: ptr, data_dir: string, bucket: string) {
     known = _known_paths(db, bucket)
-    bdir = fs.join_clean(data_dir, bucket)
-    list, lerr = fs.list_dir(bdir)
+    bdir = join_clean(data_dir, bucket)
+    list, lerr = list_dir(bdir)
     if lerr != "" { return }
     cnt = dir_list_count(list)
     i = 0
     while i < cnt {
         fname = dir_list_get(list, i)
-        sp = fs.join_clean(bucket, fname)
+        sp = join_clean(bucket, fname)
         needle = string.concat("\n", string.concat(sp, "\n"))
         if string.contains(known, needle) == 0 {
-            full = fs.join_clean(bdir, fname)
+            full = join_clean(bdir, fname)
             if dir_exists(full) == 0 {
                 file_delete_raw(full)
             }
@@ -89,13 +83,13 @@ _sweep_bucket(db: ptr, data_dir: string, bucket: string) {
 
 // Delete loose temp files under .tmp, preserving the multipart/ subtree.
 _purge_tmp(tmp: string) {
-    list, lerr = fs.list_dir(tmp)
+    list, lerr = list_dir(tmp)
     if lerr != "" { return }
     cnt = dir_list_count(list)
     i = 0
     while i < cnt {
         name = dir_list_get(list, i)
-        full = fs.join_clean(tmp, name)
+        full = join_clean(tmp, name)
         is_mp = string.equals(name, "multipart")
         if is_mp == 0 {
             if dir_exists(full) == 0 {
