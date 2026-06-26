@@ -22,17 +22,18 @@ import std.uuid
 
 import multipart
 import std.collections (*)
+import std.heap
 
 exports (register_routes, set_state, AppCtx)
 
-extern malloc(n: int) -> ptr
-
 // ---- shared state ----
-// MODERNIZED (ae 0.260.0): per-server state (db handle + data dir) now
-// rides the std.http user_data slot (#633), replacing the appstate.c
-// process-statics C shim. set_state allocates an AppCtx once at startup;
-// register_routes threads its ptr as user_data; each handler reads it
-// back via `ud as *AppCtx`.
+// Per-server state (db handle + data dir) rides the std.http user_data
+// slot (#633), replacing the original appstate.c C shim. set_state
+// allocates an AppCtx once at startup; register_routes threads its ptr
+// as user_data; each handler reads it back via `ud as *AppCtx`.
+// MODERNIZED (ae 0.309.0): heap.new(AppCtx) replaces the
+// `malloc(64) as *AppCtx` magic-number pattern — type-safe, no raw
+// malloc, and it owns its `data_dir` string field (#790).
 struct AppCtx {
     db: ptr
     data_dir: string
@@ -41,7 +42,7 @@ struct AppCtx {
 // Build the per-server context. Allocated once in main(); lives for the
 // process (OS reclaims on exit), so never freed.
 set_state(db: ptr, data_dir: string) -> ptr {
-    ctx = malloc(64) as *AppCtx
+    ctx = heap.new(AppCtx)
     ctx.db = db
     ctx.data_dir = data_dir
     return ctx
