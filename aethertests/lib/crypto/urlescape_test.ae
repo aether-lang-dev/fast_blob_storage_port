@@ -7,20 +7,20 @@ main() {
     fw = aeocha.init()
     aeocha.describe(fw, "std.url.encode_path (Go url.PathEscape parity)") {
         aeocha.it("space becomes %20") callback {
-            aeocha.assert_str_eq(fw, url.encode_path("my bucket"), "my%20bucket", "space")
+            aeocha.assert_str_eq(url.encode_path("my bucket"), "my%20bucket", "space")
         }
         aeocha.it("plus dash dot preserved") callback {
-            aeocha.assert_str_eq(fw, url.encode_path("a+b"), "a+b", "plus")
-            aeocha.assert_str_eq(fw, url.encode_path("a-b.txt"), "a-b.txt", "dashdot")
+            aeocha.assert_str_eq(url.encode_path("a+b"), "a+b", "plus")
+            aeocha.assert_str_eq(url.encode_path("a-b.txt"), "a-b.txt", "dashdot")
         }
         aeocha.it("c d.txt") callback {
-            aeocha.assert_str_eq(fw, url.encode_path("c d.txt"), "c%20d.txt", "mixed")
+            aeocha.assert_str_eq(url.encode_path("c d.txt"), "c%20d.txt", "mixed")
         }
         aeocha.it("sub-delims kept, comma/semicolon escaped") callback {
-            aeocha.assert_str_eq(fw, url.encode_path("@:&=+$,;"), "@:&=+$%2C%3B", "subdelims")
+            aeocha.assert_str_eq(url.encode_path("@:&=+$,;"), "@:&=+$%2C%3B", "subdelims")
         }
         aeocha.it("tilde underscore kept, bang star escaped") callback {
-            aeocha.assert_str_eq(fw, url.encode_path("~_.!*'()"), "~_.%21%2A%27%28%29", "specials")
+            aeocha.assert_str_eq(url.encode_path("~_.!*'()"), "~_.%21%2A%27%28%29", "specials")
         }
     }
     aeocha.run_summary(fw)

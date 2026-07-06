@@ -42,21 +42,21 @@ main() {
 
     aeocha.describe(fw, "metadata.buckets") {
         aeocha.it("create + exists") callback {
-            aeocha.assert_eq(fw, create_ok, 1, "created")
-            aeocha.assert_eq(fw, exists_alpha, 1, "alpha exists")
-            aeocha.assert_eq(fw, exists_ghost, 0, "ghost absent")
+            aeocha.assert_eq(create_ok, 1, "created")
+            aeocha.assert_eq(exists_alpha, 1, "alpha exists")
+            aeocha.assert_eq(exists_ghost, 0, "ghost absent")
         }
         aeocha.it("get_owner") callback {
-            aeocha.assert_eq(fw, owner_match, 1, "owner matches")
-            aeocha.assert_eq(fw, missing_is_notfound, 1, "missing -> not found")
+            aeocha.assert_eq(owner_match, 1, "owner matches")
+            aeocha.assert_eq(missing_is_notfound, 1, "missing -> not found")
         }
         aeocha.it("list ordered by created_at") callback {
-            aeocha.assert_eq(fw, names_match, 1, "alpha then beta")
+            aeocha.assert_eq(names_match, 1, "alpha then beta")
         }
         aeocha.it("delete") callback {
-            aeocha.assert_eq(fw, del_ok, 1, "deleted")
-            aeocha.assert_eq(fw, exists_after_del, 0, "gone")
-            aeocha.assert_eq(fw, del_ghost_notfound, 1, "delete ghost -> not found")
+            aeocha.assert_eq(del_ok, 1, "deleted")
+            aeocha.assert_eq(exists_after_del, 0, "gone")
+            aeocha.assert_eq(del_ghost_notfound, 1, "delete ghost -> not found")
         }
     }
 

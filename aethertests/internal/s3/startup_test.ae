@@ -51,18 +51,18 @@ main() {
 
     aeocha.describe(fw, "startup.reconcile") {
         aeocha.it("sets up all three files") callback {
-            aeocha.assert_eq(fw, pre_real, 1, "real present")
-            aeocha.assert_eq(fw, pre_orphan, 1, "orphan present")
-            aeocha.assert_eq(fw, pre_tmp, 1, "tmp present")
+            aeocha.assert_eq(pre_real, 1, "real present")
+            aeocha.assert_eq(pre_orphan, 1, "orphan present")
+            aeocha.assert_eq(pre_tmp, 1, "tmp present")
         }
         aeocha.it("keeps tracked object") callback {
-            aeocha.assert_eq(fw, post_real, 1, "real kept")
+            aeocha.assert_eq(post_real, 1, "real kept")
         }
         aeocha.it("removes orphan object file") callback {
-            aeocha.assert_eq(fw, post_orphan, 0, "orphan removed")
+            aeocha.assert_eq(post_orphan, 0, "orphan removed")
         }
         aeocha.it("purges loose temp file") callback {
-            aeocha.assert_eq(fw, post_tmp, 0, "tmp purged")
+            aeocha.assert_eq(post_tmp, 0, "tmp purged")
         }
     }
 

@@ -9,6 +9,7 @@
 
 import contrib.sqlite
 import std.string
+import std.bits
 
 exports (
     ERR_OBJECT_NOT_FOUND, Object,
@@ -21,7 +22,7 @@ const ERR_OBJECT_NOT_FOUND = "object not found"
 // One object's metadata row.
 struct Object {
     id: string
-    size: int
+    size: long
     etag: string
     content_type: string
     storage_path: string
@@ -34,7 +35,22 @@ const UPSERT_SQL = "INSERT INTO objects (id, bucket_name, key, size, etag, conte
 // Insert or update an object (S3 PUT overwrite semantics). size is the
 // object byte size. created_at/updated_at: pass "" for CURRENT_TIMESTAMP.
 // content_type "" -> 'application/octet-stream'. Returns "" or error.
-object_upsert(db: ptr, id: string, bucket: string, key: string, size: int, etag: string, content_type: string, storage_path: string, created_at: string, updated_at: string) -> string {
+_i64_hi(v: long) -> int {
+    return bits.lsr64(v, 32)
+}
+
+_i64_lo(v: long) -> int {
+    return v & 0xFFFFFFFF
+}
+
+_i64_join(hi: int, lo: int) -> long {
+    long out = hi
+    out = out << 32
+    long low = lo & 0xFFFFFFFF
+    return out | low
+}
+
+object_upsert(db: ptr, id: string, bucket: string, key: string, size: long, etag: string, content_type: string, storage_path: string, created_at: string, updated_at: string) -> string {
     ct = content_type
     if string.length(ct) == 0 { ct = "application/octet-stream" }
     stmt, perr = sqlite.prepare(db, UPSERT_SQL)
@@ -42,7 +58,7 @@ object_upsert(db: ptr, id: string, bucket: string, key: string, size: int, etag:
     sqlite.bind_text(stmt, 1, id)
     sqlite.bind_text(stmt, 2, bucket)
     sqlite.bind_text(stmt, 3, key)
-    sqlite.bind_int(stmt, 4, size)
+    sqlite.bind_i64(stmt, 4, _i64_hi(size), _i64_lo(size))
     sqlite.bind_text(stmt, 5, etag)
     sqlite.bind_text(stmt, 6, ct)
     sqlite.bind_text(stmt, 7, storage_path)
@@ -71,7 +87,8 @@ object_exists(db: ptr, bucket: string, key: string) -> int {
 // Get an object's metadata. Returns (Object, "") or (empty Object, err).
 // On miss, err = ERR_OBJECT_NOT_FOUND.
 object_get(db: ptr, bucket: string, key: string) -> {
-    empty = Object { id: "", size: 0, etag: "", content_type: "", storage_path: "", created_at: "", updated_at: "" }
+    long zero_size = 0
+    empty = Object { id: "", size: zero_size, etag: "", content_type: "", storage_path: "", created_at: "", updated_at: "" }
     stmt, perr = sqlite.prepare(db, "SELECT id, size, etag, content_type, storage_path, created_at, updated_at FROM objects WHERE bucket_name = ?1 AND key = ?2")
     if perr != "" { return empty, perr }
     sqlite.bind_text(stmt, 1, bucket)
@@ -80,9 +97,10 @@ object_get(db: ptr, bucket: string, key: string) -> {
         sqlite.finalize(stmt)
         return empty, ERR_OBJECT_NOT_FOUND
     }
+    size_hi, size_lo = sqlite.column_i64(stmt, 1)
     obj = Object {
         id: string.copy(sqlite.column_text(stmt, 0)),
-        size: sqlite.column_int(stmt, 1),
+        size: _i64_join(size_hi, size_lo),
         etag: string.copy(sqlite.column_text(stmt, 2)),
         content_type: string.copy(sqlite.column_text(stmt, 3)),
         storage_path: string.copy(sqlite.column_text(stmt, 4)),

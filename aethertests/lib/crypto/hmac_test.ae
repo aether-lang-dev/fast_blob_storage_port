@@ -8,13 +8,13 @@ main() {
     fw = aeocha.init()
     aeocha.describe(fw, "hmac.equal_hex (constant-time compare)") {
         aeocha.it("equal strings match") callback {
-            aeocha.assert_eq(fw, hmac.equal_hex("deadbeef", "deadbeef"), 1, "eq")
+            aeocha.assert_eq(hmac.equal_hex("deadbeef", "deadbeef"), 1, "eq")
         }
         aeocha.it("different strings reject") callback {
-            aeocha.assert_eq(fw, hmac.equal_hex("deadbeef", "deadbee0"), 0, "neq")
+            aeocha.assert_eq(hmac.equal_hex("deadbeef", "deadbee0"), 0, "neq")
         }
         aeocha.it("different lengths reject") callback {
-            aeocha.assert_eq(fw, hmac.equal_hex("ab", "abcd"), 0, "len")
+            aeocha.assert_eq(hmac.equal_hex("ab", "abcd"), 0, "len")
         }
     }
     aeocha.run_summary(fw)

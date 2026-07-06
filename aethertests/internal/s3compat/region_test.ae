@@ -5,7 +5,7 @@ main() {
     fw = aeocha.init()
     aeocha.describe(fw, "s3compat") {
         aeocha.it("REGION is us-east-1") callback {
-            aeocha.assert_str_eq(fw, region.REGION, "us-east-1", "region")
+            aeocha.assert_str_eq(region.REGION, "us-east-1", "region")
         }
     }
     aeocha.run_summary(fw)

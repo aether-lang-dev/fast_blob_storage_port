@@ -5,6 +5,7 @@
 
 import contrib.sqlite
 import std.string
+import std.bits
 
 exports (activity_create, activity_count, activity_list_actions)
 
@@ -12,7 +13,15 @@ const INSERT_SQL = "INSERT INTO object_activity (id, action, bucket_name, object
 
 // Record an activity. object_key/etag/actor_user_id "" -> NULL;
 // size 0 -> NULL. Returns "" or error.
-activity_create(db: ptr, id: string, action: string, bucket: string, object_key: string, size: int, etag: string, actor_user_id: string) -> string {
+_i64_hi(v: long) -> int {
+    return bits.lsr64(v, 32)
+}
+
+_i64_lo(v: long) -> int {
+    return v & 0xFFFFFFFF
+}
+
+activity_create(db: ptr, id: string, action: string, bucket: string, object_key: string, size: long, etag: string, actor_user_id: string) -> string {
     stmt, perr = sqlite.prepare(db, INSERT_SQL)
     if perr != "" { return perr }
     sqlite.bind_text(stmt, 1, id)
@@ -21,7 +30,7 @@ activity_create(db: ptr, id: string, action: string, bucket: string, object_key:
     if string.length(object_key) == 0 { sqlite.bind_null(stmt, 4) }
     else { sqlite.bind_text(stmt, 4, object_key) }
     if size == 0 { sqlite.bind_null(stmt, 5) }
-    else { sqlite.bind_int(stmt, 5, size) }
+    else { sqlite.bind_i64(stmt, 5, _i64_hi(size), _i64_lo(size)) }
     if string.length(etag) == 0 { sqlite.bind_null(stmt, 6) }
     else { sqlite.bind_text(stmt, 6, etag) }
     if string.length(actor_user_id) == 0 { sqlite.bind_null(stmt, 7) }

@@ -16,19 +16,19 @@ main() {
 
     aeocha.describe(fw, "storage.validate_key") {
         aeocha.it("accepts valid keys") callback {
-            aeocha.assert_str_eq(fw, storage.validate_key("file.txt"), "", "file.txt")
-            aeocha.assert_str_eq(fw, storage.validate_key("a/b/c.txt"), "", "nested")
-            aeocha.assert_str_eq(fw, storage.validate_key("photos/2024/image.jpg"), "", "deep")
+            aeocha.assert_str_eq(storage.validate_key("file.txt"), "", "file.txt")
+            aeocha.assert_str_eq(storage.validate_key("a/b/c.txt"), "", "nested")
+            aeocha.assert_str_eq(storage.validate_key("photos/2024/image.jpg"), "", "deep")
         }
         aeocha.it("rejects empty/dot/dotdot/absolute") callback {
-            aeocha.assert_str_eq(fw, storage.validate_key(""), storage.ERR_INVALID_KEY, "empty")
-            aeocha.assert_str_eq(fw, storage.validate_key("."), storage.ERR_INVALID_KEY, "dot")
-            aeocha.assert_str_eq(fw, storage.validate_key(".."), storage.ERR_INVALID_KEY, "dotdot")
-            aeocha.assert_str_eq(fw, storage.validate_key("/tmp/x"), storage.ERR_INVALID_KEY, "abs")
+            aeocha.assert_str_eq(storage.validate_key(""), storage.ERR_INVALID_KEY, "empty")
+            aeocha.assert_str_eq(storage.validate_key("."), storage.ERR_INVALID_KEY, "dot")
+            aeocha.assert_str_eq(storage.validate_key(".."), storage.ERR_INVALID_KEY, "dotdot")
+            aeocha.assert_str_eq(storage.validate_key("/tmp/x"), storage.ERR_INVALID_KEY, "abs")
         }
         aeocha.it("flags traversal") callback {
-            aeocha.assert_str_eq(fw, storage.validate_key("../etc/passwd"), storage.ERR_PATH_TRAVERSAL, "trav")
-            aeocha.assert_str_eq(fw, storage.validate_key("a/../../b"), storage.ERR_PATH_TRAVERSAL, "nested trav")
+            aeocha.assert_str_eq(storage.validate_key("../etc/passwd"), storage.ERR_PATH_TRAVERSAL, "trav")
+            aeocha.assert_str_eq(storage.validate_key("a/../../b"), storage.ERR_PATH_TRAVERSAL, "nested trav")
         }
         aeocha.it("rejects control chars") callback {
             // Build "bad\x00key" via a byte buffer — string.concat is
@@ -42,9 +42,9 @@ main() {
             bytes.set(nb, 5, 101)
             bytes.set(nb, 6, 121)
             nul = bytes.finish(nb, 7)
-            aeocha.assert_str_eq(fw, storage.validate_key(nul), storage.ERR_INVALID_KEY, "nul")
+            aeocha.assert_str_eq(storage.validate_key(nul), storage.ERR_INVALID_KEY, "nul")
             nl = string.concat("bad", string.concat(string.from_char(10), "key"))
-            aeocha.assert_str_eq(fw, storage.validate_key(nl), storage.ERR_INVALID_KEY, "newline")
+            aeocha.assert_str_eq(storage.validate_key(nl), storage.ERR_INVALID_KEY, "newline")
         }
     }
 
@@ -53,36 +53,38 @@ main() {
             payload = "hello aether storage"
             plen = string.length(payload)
             sp, size, werr = storage.write(data_dir, "mybucket", "docs/readme.txt", payload, plen)
-            aeocha.assert_str_eq(fw, werr, "", "write ok")
-            aeocha.assert_eq(fw, size, plen, "size echoed")
+            aeocha.assert_str_eq(werr, "", "write ok")
+            size_ok = 0
+            if size == plen { size_ok = 1 }
+            aeocha.assert_eq(size_ok, 1, "size echoed")
 
             got, glen, rerr = storage.read(data_dir, sp)
-            aeocha.assert_str_eq(fw, rerr, "", "read ok")
-            aeocha.assert_eq(fw, glen, plen, "read len")
-            aeocha.assert_str_eq(fw, got, payload, "read content")
+            aeocha.assert_str_eq(rerr, "", "read ok")
+            aeocha.assert_eq(glen, plen, "read len")
+            aeocha.assert_str_eq(got, payload, "read content")
 
             derr = storage.delete_object(data_dir, sp)
-            aeocha.assert_str_eq(fw, derr, "", "delete ok")
+            aeocha.assert_str_eq(derr, "", "delete ok")
 
             _, _, rerr2 = storage.read(data_dir, sp)
-            aeocha.assert_str_eq(fw, rerr2, storage.ERR_NOT_FOUND, "gone after delete")
+            aeocha.assert_str_eq(rerr2, storage.ERR_NOT_FOUND, "gone after delete")
         }
 
         aeocha.it("delete is idempotent") callback {
             sp, size, werr = storage.write(data_dir, "b2", "x.bin", "abc", 3)
             storage.delete_object(data_dir, sp)
             derr = storage.delete_object(data_dir, sp)
-            aeocha.assert_str_eq(fw, derr, "", "second delete no error")
+            aeocha.assert_str_eq(derr, "", "second delete no error")
         }
 
         aeocha.it("rejects write with bad key") callback {
             _, _, werr = storage.write(data_dir, "b", "../escape", "x", 1)
-            aeocha.assert_str_eq(fw, werr, storage.ERR_PATH_TRAVERSAL, "traversal blocked")
+            aeocha.assert_str_eq(werr, storage.ERR_PATH_TRAVERSAL, "traversal blocked")
         }
 
         aeocha.it("rejects storage path escape on read") callback {
             _, _, rerr = storage.read(data_dir, "../outside.txt")
-            aeocha.assert_str_eq(fw, rerr, storage.ERR_PATH_TRAVERSAL, "escape blocked")
+            aeocha.assert_str_eq(rerr, storage.ERR_PATH_TRAVERSAL, "escape blocked")
         }
     }
 

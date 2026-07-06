@@ -232,33 +232,43 @@ stream_finish(file: ptr) -> string {
     return ferr
 }
 
+_as_long(n: int) -> long {
+    long out = n
+    return out
+}
+
+_zero_size() -> long {
+    long z = 0
+    return z
+}
+
 // --- write / read / delete ---
 
 // Write an object. Validates bucket/key, then writes the buffered body
 // to a UUID-named path under the bucket dir via write_atomic (the
 // metadata insert downstream is the real commit point). Returns
 // (storage_path, size, "") or ("", 0, err).
-write(data_dir: string, bucket: string, key: string, data: string, length: int) -> {
+write(data_dir: string, bucket: string, key: string, data: string, length: int) -> (string, long, string) {
     sp_check, full_check, rerr = resolve_key_path(data_dir, bucket, key)
     if rerr != "" {
-        return "", 0, rerr
+        return "", _zero_size(), rerr
     }
     sp = join_clean(bucket, uuid.v4()!)
     full = join_clean(data_dir, sp)
     if is_within_base(data_dir, full) == 0 {
-        return "", 0, ERR_PATH_TRAVERSAL
+        return "", _zero_size(), ERR_PATH_TRAVERSAL
     }
     // ensure the bucket dir exists
     bucket_dir = path_dirname(full)
     derr = mkdir_p(bucket_dir)
     if derr != "" {
-        return "", 0, derr
+        return "", _zero_size(), derr
     }
     werr = write_atomic(full, data, length)
     if werr != "" {
-        return "", 0, werr
+        return "", _zero_size(), werr
     }
-    return sp, length, ""
+    return sp, _as_long(length), ""
 }
 
 // Read an object by storage path. Returns (data, length, "") or
@@ -322,72 +332,74 @@ _part_dir(data_dir: string, upload_id: string) -> string {
 // Write one multipart part. Returns (storage_path, size, "") or
 // ("", 0, err). The part keeps a unique filename so concurrent uploads
 // of the same part number don't race.
-write_part(data_dir: string, upload_id: string, part_number: int, data: string, length: int) -> {
+write_part(data_dir: string, upload_id: string, part_number: int, data: string, length: int) -> (string, long, string) {
     verr = _validate_upload_id(upload_id)
     if verr != "" {
-        return "", 0, verr
+        return "", _zero_size(), verr
     }
     part_dir = _part_dir(data_dir, upload_id)
     derr = mkdir_p(part_dir)
     if derr != "" {
-        return "", 0, derr
+        return "", _zero_size(), derr
     }
     pn = string.from_int(part_number)
     fname = string.concat(pn, string.concat(".", cryptography.random_hex(8)!))
     full = join_clean(part_dir, fname)
     werr = write_atomic(full, data, length)
     if werr != "" {
-        return "", 0, werr
+        return "", _zero_size(), werr
     }
     // storage path relative to data_dir
     rel = join_clean(".tmp", "multipart")
     rel = join_clean(rel, upload_id)
     rel = join_clean(rel, fname)
-    return rel, length, ""
+    return rel, _as_long(length), ""
 }
 
 // Assemble ordered parts into a final object. part_paths is a DirList-
 // style *StringSeq? — here we take a std.collections string list ptr and
 // a count for simplicity. Returns (storage_path, total_size, "") or err.
 // Parts are concatenated in the given order.
-assemble_parts(data_dir: string, bucket: string, key: string, part_full_paths: ptr, count: int) -> {
+assemble_parts(data_dir: string, bucket: string, key: string, part_full_paths: ptr, count: int) -> (string, long, string) {
     verr = validate_key(key)
     if verr != "" {
-        return "", 0, verr
+        return "", _zero_size(), verr
     }
     sp = join_clean(bucket, uuid.v4()!)
     full = join_clean(data_dir, sp)
     if is_within_base(data_dir, full) == 0 {
-        return "", 0, ERR_PATH_TRAVERSAL
+        return "", _zero_size(), ERR_PATH_TRAVERSAL
     }
     // Concatenate all parts into one buffer.
-    total = 0
+    total_len = 0
+    long total_size = 0
     combined = ""
     i = 0
     while i < count {
         part_sp = string_list_get(part_full_paths, i)
         pfull, perr = resolve_storage_path(data_dir, part_sp)
         if perr != "" {
-            return "", 0, perr
+            return "", _zero_size(), perr
         }
         pdata, plen, rerr = read_binary(pfull)
         if rerr != "" {
-            return "", 0, rerr
+            return "", _zero_size(), rerr
         }
         combined = string.concat(combined, pdata)
-        total = total + plen
+        total_len = total_len + plen
+        total_size = total_size + _as_long(plen)
         i = i + 1
     }
     bucket_dir = path_dirname(full)
     derr = mkdir_p(bucket_dir)
     if derr != "" {
-        return "", 0, derr
+        return "", _zero_size(), derr
     }
-    werr = write_atomic(full, combined, total)
+    werr = write_atomic(full, combined, total_len)
     if werr != "" {
-        return "", 0, werr
+        return "", _zero_size(), werr
     }
-    return sp, total, ""
+    return sp, total_size, ""
 }
 
 // Delete all parts for an upload. Returns "" or err.

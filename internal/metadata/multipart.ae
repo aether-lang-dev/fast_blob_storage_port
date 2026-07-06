@@ -7,6 +7,7 @@
 
 import contrib.sqlite
 import std.string
+import std.bits
 
 exports (
     ERR_MPU_NOT_FOUND, ERR_UPLOAD_ALREADY_CLAIMED,
@@ -122,7 +123,15 @@ _current_status(db: ptr, id: string) -> {
 // Add (or replace) a part. Returns (old_storage_path, "") where
 // old_storage_path is the previous part's path ("" if new), or
 // ("", err). Only valid while the upload is active.
-mpu_add_part(db: ptr, upload_id: string, part_number: int, size: int, etag: string, storage_path: string) -> {
+_i64_hi(v: long) -> int {
+    return bits.lsr64(v, 32)
+}
+
+_i64_lo(v: long) -> int {
+    return v & 0xFFFFFFFF
+}
+
+mpu_add_part(db: ptr, upload_id: string, part_number: int, size: long, etag: string, storage_path: string) -> {
     cur, gerr = _current_status(db, upload_id)
     if gerr != "" { return "", gerr }
     if string.equals(cur, STATUS_ACTIVE) == 0 { return "", ERR_UPLOAD_ALREADY_CLAIMED }
@@ -142,7 +151,7 @@ mpu_add_part(db: ptr, upload_id: string, part_number: int, size: int, etag: stri
     if perr2 != "" { return "", perr2 }
     sqlite.bind_text(s2, 1, upload_id)
     sqlite.bind_int(s2, 2, part_number)
-    sqlite.bind_int(s2, 3, size)
+    sqlite.bind_i64(s2, 3, _i64_hi(size), _i64_lo(size))
     sqlite.bind_text(s2, 4, etag)
     sqlite.bind_text(s2, 5, storage_path)
     rc, serr = sqlite.step(s2, db)

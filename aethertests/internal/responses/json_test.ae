@@ -49,23 +49,23 @@ main() {
 
         aeocha.it("default: 200, JSON body, JSON content-type, no cache header") callback {
             resp = _get(port, "/plain")
-            aeocha.expect_http_status(fw, resp, 200, "status 200")
-            aeocha.expect_http_body_contains(fw, resp, "\"hello\":\"world\"", "body")
+            aeocha.expect_http_status(resp, 200, "status 200")
+            aeocha.expect_http_body_contains(resp, "\"hello\":\"world\"", "body")
             ct = client.response_header(resp, "Content-Type")
-            aeocha.assert_str_eq(fw, ct, "application/json; charset=utf-8", "content-type")
+            aeocha.assert_str_eq(ct, "application/json; charset=utf-8", "content-type")
             cc = client.response_header(resp, "Cache-Control")
-            aeocha.assert_str_eq(fw, cc, "", "no cache-control on default")
+            aeocha.assert_str_eq(cc, "", "no cache-control on default")
             client.response_free(resp)
         }
 
         aeocha.it("no-store: 201, body, Cache-Control no-store, Pragma no-cache") callback {
             resp = _get(port, "/nostore")
-            aeocha.expect_http_status(fw, resp, 201, "status 201")
-            aeocha.expect_http_body_contains(fw, resp, "\"created\":true", "body")
+            aeocha.expect_http_status(resp, 201, "status 201")
+            aeocha.expect_http_body_contains(resp, "\"created\":true", "body")
             cc = client.response_header(resp, "Cache-Control")
-            aeocha.assert_str_eq(fw, cc, "no-store", "cache-control")
+            aeocha.assert_str_eq(cc, "no-store", "cache-control")
             pragma = client.response_header(resp, "Pragma")
-            aeocha.assert_str_eq(fw, pragma, "no-cache", "pragma")
+            aeocha.assert_str_eq(pragma, "no-cache", "pragma")
             client.response_free(resp)
         }
     }

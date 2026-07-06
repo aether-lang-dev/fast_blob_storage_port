@@ -459,7 +459,7 @@ handle_head_object(req: ptr, res: ptr, ud: ptr) {
     http.response_set_status(res, 200)
     http.response_set_header(res, "Content-Type", obj.content_type)
     http.response_set_header(res, "ETag", qetag)
-    http.response_set_header(res, "Content-Length", string.from_int(obj.size))
+    http.response_set_header(res, "Content-Length", string.from_long(obj.size))
     http.response_set_body(res, "")
 }
 

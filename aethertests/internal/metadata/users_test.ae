@@ -51,23 +51,23 @@ main() {
 
     aeocha.describe(fw, "metadata.users") {
         aeocha.it("bootstrap first admin, blocks second") callback {
-            aeocha.assert_eq(fw, first_ok, 1, "first created")
-            aeocha.assert_eq(fw, second_blocked, 1, "second blocked")
-            aeocha.assert_eq(fw, cnt, 1, "one user")
+            aeocha.assert_eq(first_ok, 1, "first created")
+            aeocha.assert_eq(second_blocked, 1, "second blocked")
+            aeocha.assert_eq(cnt, 1, "one user")
         }
         aeocha.it("bearer lookup + secret hash") callback {
-            aeocha.assert_eq(fw, bearer_ok, 1, "bearer fields")
-            aeocha.assert_eq(fw, hash_ok, 1, "secret hash")
+            aeocha.assert_eq(bearer_ok, 1, "bearer fields")
+            aeocha.assert_eq(hash_ok, 1, "secret hash")
         }
         aeocha.it("sigv4 auth lookup exposes secret") callback {
-            aeocha.assert_eq(fw, sig_ok, 1, "sigv4 secret returned")
+            aeocha.assert_eq(sig_ok, 1, "sigv4 secret returned")
         }
         aeocha.it("missing user") callback {
-            aeocha.assert_eq(fw, miss_ok, 1, "not found")
+            aeocha.assert_eq(miss_ok, 1, "not found")
         }
         aeocha.it("set_active + delete") callback {
-            aeocha.assert_eq(fw, deactivate_ok, 1, "deactivated")
-            aeocha.assert_eq(fw, del_ok, 1, "deleted")
+            aeocha.assert_eq(deactivate_ok, 1, "deactivated")
+            aeocha.assert_eq(del_ok, 1, "deleted")
         }
     }
 

@@ -1,0 +1,46 @@
+import schema
+import objects
+import management
+import activity
+import s3xml
+import contrib.sqlite
+import std.string
+
+extern exit(code: int)
+
+fail(msg: string) {
+    println("FAIL large_sizes: ${msg}")
+    exit(1)
+}
+
+main() {
+    db, oerr = schema.open_db(":memory:")
+    if oerr != "" { fail(oerr) }
+
+    sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role, is_active) VALUES ('u','U','ak','sh','admin',1)")
+    sqlite.exec(db, "INSERT INTO buckets (name, owner_id) VALUES ('b','u')")
+
+    long big = 8589934599
+    uerr = objects.object_upsert(db, "o1", "b", "huge.bin", big, "etag", "application/octet-stream", "b/huge", "", "")
+    if uerr != "" { fail("object_upsert: ${uerr}") }
+
+    obj, gerr = objects.object_get(db, "b", "huge.bin")
+    if gerr != "" { fail("object_get: ${gerr}") }
+    if obj.size != big { fail("object_get size ${string.from_long(obj.size)}") }
+
+    bc, oc, ob, uc, auc = management.metrics(db)
+    if ob != big { fail("metrics bytes ${string.from_long(ob)}") }
+
+    bbytes = management.bucket_total_bytes(db, "b")
+    if bbytes != big { fail("bucket bytes ${string.from_long(bbytes)}") }
+
+    aerr = activity.activity_create(db, "a1", "create", "b", "huge.bin", big, "etag", "u")
+    if aerr != "" { fail("activity_create: ${aerr}") }
+
+    xml = s3xml.list_bucket_contents_xml("huge.bin", "2026-07-06T00:00:00Z", "etag", big)
+    if string.contains(xml, "<Size>8589934599</Size>") != 1 {
+        fail("xml size missing")
+    }
+
+    println("PASS large_sizes")
+}

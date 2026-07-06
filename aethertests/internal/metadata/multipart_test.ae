@@ -56,22 +56,22 @@ main() {
 
     aeocha.describe(fw, "metadata.multipart") {
         aeocha.it("create + status") callback {
-            aeocha.assert_eq(fw, create_ok, 1, "created")
-            aeocha.assert_eq(fw, status_ok, 1, "active status")
+            aeocha.assert_eq(create_ok, 1, "created")
+            aeocha.assert_eq(status_ok, 1, "active status")
         }
         aeocha.it("add parts") callback {
-            aeocha.assert_eq(fw, parts_ok, 1, "parts added")
-            aeocha.assert_eq(fw, pc, 2, "two parts")
-            aeocha.assert_eq(fw, paths_ok, 1, "ordered paths")
-            aeocha.assert_eq(fw, replace_ok, 1, "replace returns old path")
+            aeocha.assert_eq(parts_ok, 1, "parts added")
+            aeocha.assert_eq(pc, 2, "two parts")
+            aeocha.assert_eq(paths_ok, 1, "ordered paths")
+            aeocha.assert_eq(replace_ok, 1, "replace returns old path")
         }
         aeocha.it("claim lifecycle") callback {
-            aeocha.assert_eq(fw, claim_ok, 1, "claimed")
-            aeocha.assert_eq(fw, second_claim_blocked, 1, "second claim blocked")
-            aeocha.assert_eq(fw, add_after_claim_blocked, 1, "add after claim blocked")
+            aeocha.assert_eq(claim_ok, 1, "claimed")
+            aeocha.assert_eq(second_claim_blocked, 1, "second claim blocked")
+            aeocha.assert_eq(add_after_claim_blocked, 1, "add after claim blocked")
         }
         aeocha.it("delete cascades parts") callback {
-            aeocha.assert_eq(fw, del_ok, 1, "deleted + parts gone")
+            aeocha.assert_eq(del_ok, 1, "deleted + parts gone")
         }
     }
 

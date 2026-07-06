@@ -90,7 +90,7 @@ list_bucket_v2_open(bucket: string, prefix: string, key_count: int, max_keys: in
     return out
 }
 
-list_bucket_contents_xml(key: string, last_modified: string, etag: string, size: int) -> string {
+list_bucket_contents_xml(key: string, last_modified: string, etag: string, size: long) -> string {
     out = "<Contents><Key>"
     out = string.concat(out, xml_escape(key))
     out = string.concat(out, "</Key><LastModified>")
@@ -98,7 +98,7 @@ list_bucket_contents_xml(key: string, last_modified: string, etag: string, size:
     out = string.concat(out, "</LastModified><ETag>&quot;")
     out = string.concat(out, etag)
     out = string.concat(out, "&quot;</ETag><Size>")
-    out = string.concat(out, string.from_int(size))
+    out = string.concat(out, string.from_long(size))
     out = string.concat(out, "</Size><StorageClass>STANDARD</StorageClass></Contents>")
     return out
 }

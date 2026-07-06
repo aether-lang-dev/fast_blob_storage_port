@@ -43,27 +43,27 @@ main() {
 
     aeocha.describe(fw, "auth") {
         aeocha.it("bearer hash + verify") callback {
-            aeocha.assert_eq(fw, vok, 1, "correct secret verifies")
-            aeocha.assert_eq(fw, vbad, 0, "wrong secret rejected")
+            aeocha.assert_eq(vok, 1, "correct secret verifies")
+            aeocha.assert_eq(vbad, 0, "wrong secret rejected")
         }
         aeocha.it("bearer split") callback {
-            aeocha.assert_eq(fw, bearer_split_ok, 1, "split ok")
-            aeocha.assert_eq(fw, bearer_malformed, 1, "no dot -> malformed")
+            aeocha.assert_eq(bearer_split_ok, 1, "split ok")
+            aeocha.assert_eq(bearer_malformed, 1, "no dot -> malformed")
         }
         aeocha.it("credential parse") callback {
-            aeocha.assert_eq(fw, cred_ok, 1, "valid credential")
-            aeocha.assert_eq(fw, cred_bad, 1, "short date rejected")
+            aeocha.assert_eq(cred_ok, 1, "valid credential")
+            aeocha.assert_eq(cred_bad, 1, "short date rejected")
         }
         aeocha.it("signed headers require host") callback {
-            aeocha.assert_eq(fw, sh_ok, 1, "host present")
-            aeocha.assert_eq(fw, sh_bad, 0, "host absent")
+            aeocha.assert_eq(sh_ok, 1, "host present")
+            aeocha.assert_eq(sh_bad, 0, "host absent")
         }
         aeocha.it("authorization header parse") callback {
-            aeocha.assert_eq(fw, authhdr_ok, 1, "parsed cred/signed/sig")
+            aeocha.assert_eq(authhdr_ok, 1, "parsed cred/signed/sig")
         }
         aeocha.it("end-to-end signature verify (Go parity)") callback {
-            aeocha.assert_eq(fw, sig_match, 1, "valid signature matches")
-            aeocha.assert_eq(fw, sig_bad, 0, "wrong secret fails")
+            aeocha.assert_eq(sig_match, 1, "valid signature matches")
+            aeocha.assert_eq(sig_bad, 0, "wrong secret fails")
         }
     }
 

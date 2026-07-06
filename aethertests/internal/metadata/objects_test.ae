@@ -57,28 +57,28 @@ main() {
 
     aeocha.describe(fw, "metadata.objects") {
         aeocha.it("upsert insert + get") callback {
-            aeocha.assert_eq(fw, ins_ok, 1, "inserted")
-            aeocha.assert_eq(fw, get_ok, 1, "fields match")
+            aeocha.assert_eq(ins_ok, 1, "inserted")
+            aeocha.assert_eq(get_ok, 1, "fields match")
         }
         aeocha.it("upsert overwrite") callback {
-            aeocha.assert_eq(fw, over_ok, 1, "overwritten")
+            aeocha.assert_eq(over_ok, 1, "overwritten")
         }
         aeocha.it("exists") callback {
-            aeocha.assert_eq(fw, ex, 1, "present")
-            aeocha.assert_eq(fw, ex_ghost, 0, "absent")
+            aeocha.assert_eq(ex, 1, "present")
+            aeocha.assert_eq(ex_ghost, 0, "absent")
         }
         aeocha.it("pagination truncation") callback {
-            aeocha.assert_eq(fw, page_match, 1, "2 keys + truncated")
+            aeocha.assert_eq(page_match, 1, "2 keys + truncated")
         }
         aeocha.it("start_after pagination") callback {
-            aeocha.assert_eq(fw, after_match, 1, "keys after k2")
+            aeocha.assert_eq(after_match, 1, "keys after k2")
         }
         aeocha.it("prefix filter") callback {
-            aeocha.assert_eq(fw, prefix_match, 1, "only photos/")
+            aeocha.assert_eq(prefix_match, 1, "only photos/")
         }
         aeocha.it("delete") callback {
-            aeocha.assert_eq(fw, del_ok, 1, "deleted")
-            aeocha.assert_eq(fw, ex_after, 0, "gone")
+            aeocha.assert_eq(del_ok, 1, "deleted")
+            aeocha.assert_eq(ex_after, 0, "gone")
         }
     }
 

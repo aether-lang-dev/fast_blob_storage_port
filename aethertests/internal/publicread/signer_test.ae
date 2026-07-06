@@ -20,33 +20,33 @@ main() {
 
         aeocha.it("ObjectPath escapes segments, preserves slashes") callback {
             got = signer.object_path("my bucket", "folder/a+b/c d.txt")
-            aeocha.assert_str_eq(fw, got, "/public/my%20bucket/folder/a+b/c%20d.txt", "objpath")
+            aeocha.assert_str_eq(got, "/public/my%20bucket/folder/a+b/c%20d.txt", "objpath")
         }
 
         aeocha.it("SignPath matches Go reference (parity)") callback {
             path = signer.object_path("my bucket", "folder/a+b.txt")
             got = signer.sign_path(SECRET, path, EXP_UNIX)
-            aeocha.assert_str_eq(fw, got, GO_SIG, "sig parity")
+            aeocha.assert_str_eq(got, GO_SIG, "sig parity")
         }
 
         aeocha.it("Verify accepts a valid signature") callback {
             path = signer.object_path("my bucket", "folder/a+b.txt")
             sig = signer.sign_path(SECRET, path, EXP_UNIX)
             err = signer.verify(SECRET, path, EXP_STR, sig, NOW_UNIX)
-            aeocha.assert_str_eq(fw, err, "", "valid")
+            aeocha.assert_str_eq(err, "", "valid")
         }
 
         aeocha.it("Verify rejects malformed signature") callback {
             path = signer.object_path("my bucket", "folder/a+b.txt")
             err = signer.verify(SECRET, path, EXP_STR, "bad", NOW_UNIX)
-            aeocha.assert_str_eq(fw, err, signer.ERR_MALFORMED, "malformed")
+            aeocha.assert_str_eq(err, signer.ERR_MALFORMED, "malformed")
         }
 
         aeocha.it("Verify rejects an invalid (wrong-path) signature") callback {
             path = signer.object_path("my bucket", "folder/a+b.txt")
             wrong = signer.sign_path(SECRET, "/different", EXP_UNIX)
             err = signer.verify(SECRET, path, EXP_STR, wrong, NOW_UNIX)
-            aeocha.assert_str_eq(fw, err, signer.ERR_INVALID, "invalid")
+            aeocha.assert_str_eq(err, signer.ERR_INVALID, "invalid")
         }
 
         aeocha.it("Verify rejects an expired signature") callback {
@@ -55,17 +55,17 @@ main() {
             past = "1778666399"
             sig = signer.sign_path(SECRET, path, 1778666399)
             err = signer.verify(SECRET, path, past, sig, NOW_UNIX)
-            aeocha.assert_str_eq(fw, err, signer.ERR_EXPIRED, "expired")
+            aeocha.assert_str_eq(err, signer.ERR_EXPIRED, "expired")
         }
 
         aeocha.it("new_secret rejects short secrets") callback {
             s, err = signer.new_secret("tooshort")
-            aeocha.assert_str_eq(fw, err, signer.ERR_DISABLED, "short")
+            aeocha.assert_str_eq(err, signer.ERR_DISABLED, "short")
         }
 
         aeocha.it("new_secret accepts a 32-byte secret") callback {
             s, err = signer.new_secret(SECRET)
-            aeocha.assert_str_eq(fw, err, "", "ok")
+            aeocha.assert_str_eq(err, "", "ok")
         }
     }
 

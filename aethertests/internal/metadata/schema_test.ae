@@ -46,20 +46,20 @@ main() {
 
     aeocha.describe(fw, "metadata.schema") {
         aeocha.it("opens and applies schema without error") callback {
-            aeocha.assert_eq(fw, open_ok, 1, "open_db ok")
-            aeocha.assert_not_null(fw, db, "db handle")
+            aeocha.assert_eq(open_ok, 1, "open_db ok")
+            aeocha.assert_not_null(db, "db handle")
         }
         aeocha.it("creates all six tables") callback {
-            aeocha.assert_eq(fw, table_count, 6, "six tables")
+            aeocha.assert_eq(table_count, 6, "six tables")
         }
         aeocha.it("enforces role CHECK constraint") callback {
-            aeocha.assert_eq(fw, role_rejected, 1, "bad role rejected")
+            aeocha.assert_eq(role_rejected, 1, "bad role rejected")
         }
         aeocha.it("accepts valid user + bucket + object") callback {
-            aeocha.assert_eq(fw, u_ok, 1, "user insert")
-            aeocha.assert_eq(fw, b_ok, 1, "bucket insert")
-            aeocha.assert_eq(fw, o_ok, 1, "object insert")
-            aeocha.assert_eq(fw, obj_count, 1, "one object")
+            aeocha.assert_eq(u_ok, 1, "user insert")
+            aeocha.assert_eq(b_ok, 1, "bucket insert")
+            aeocha.assert_eq(o_ok, 1, "object insert")
+            aeocha.assert_eq(obj_count, 1, "one object")
         }
     }
 

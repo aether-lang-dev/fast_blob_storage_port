@@ -11,7 +11,7 @@ exports (metrics, bucket_object_count, bucket_total_bytes)
 metrics(db: ptr) -> {
     bc = _scalar(db, "SELECT COUNT(*) FROM buckets")
     oc = _scalar(db, "SELECT COUNT(*) FROM objects")
-    ob = _scalar(db, "SELECT COALESCE(SUM(size), 0) FROM objects")
+    ob = _scalar_i64(db, "SELECT COALESCE(SUM(size), 0) FROM objects")
     uc = _scalar(db, "SELECT COUNT(*) FROM users")
     auc = _scalar(db, "SELECT COALESCE(SUM(CASE WHEN is_active != 0 THEN 1 ELSE 0 END), 0) FROM users")
     return bc, oc, ob, uc, auc
@@ -29,12 +29,15 @@ bucket_object_count(db: ptr, bucket: string) -> int {
 }
 
 // Total object bytes for one bucket.
-bucket_total_bytes(db: ptr, bucket: string) -> int {
+bucket_total_bytes(db: ptr, bucket: string) -> long {
     stmt, perr = sqlite.prepare(db, "SELECT COALESCE(SUM(size), 0) FROM objects WHERE bucket_name = ?1")
     if perr != "" { return -1 }
     sqlite.bind_text(stmt, 1, bucket)
-    n = 0
-    if sqlite.next_row(stmt, db) == 1 { n = sqlite.column_int(stmt, 0) }
+    long n = 0
+    if sqlite.next_row(stmt, db) == 1 {
+        hi, lo = sqlite.column_i64(stmt, 0)
+        n = _i64_join(hi, lo)
+    }
     sqlite.finalize(stmt)
     return n
 }
@@ -45,6 +48,26 @@ _scalar(db: ptr, sql: string) -> int {
     if perr != "" { return 0 }
     n = 0
     if sqlite.next_row(stmt, db) == 1 { n = sqlite.column_int(stmt, 0) }
+    sqlite.finalize(stmt)
+    return n
+}
+
+_i64_join(hi: int, lo: int) -> long {
+    long out = hi
+    out = out << 32
+    long low = lo & 0xFFFFFFFF
+    return out | low
+}
+
+// Run a single 64-bit integer SELECT and return the value (0 on error).
+_scalar_i64(db: ptr, sql: string) -> long {
+    stmt, perr = sqlite.prepare(db, sql)
+    if perr != "" { return 0 }
+    long n = 0
+    if sqlite.next_row(stmt, db) == 1 {
+        hi, lo = sqlite.column_i64(stmt, 0)
+        n = _i64_join(hi, lo)
+    }
     sqlite.finalize(stmt)
     return n
 }
