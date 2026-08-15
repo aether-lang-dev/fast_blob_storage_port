@@ -1,38 +1,38 @@
-import aeocha
+import std.spec
 import sigv4
 import std.string
 
 main() {
-    fw = aeocha.init()
+    fw = spec.init()
 
-    aeocha.describe(fw, "sigv4 crypto (Go parity)") {
-        aeocha.it("AWS documented computeSignature vector") callback {
+    spec.describe(fw, "sigv4 crypto (Go parity)") {
+        spec.it("AWS documented computeSignature vector") callback {
             sts = "AWS4-HMAC-SHA256\n20150830T123600Z\n20150830/us-east-1/iam/aws4_request\nf536975d06c0309214f805bb90ccff089219ecd68b2577efef23edd43b7e1a59"
             got = sigv4.compute_signature("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", "20150830", "us-east-1", "iam", sts)
             want = "5d672d79c15b13162d9279b0855cfba6789a8edb4c82c400e06b5924a6f2b5d7"
-            aeocha.assert_str_eq(got, want, "aws doc sig")
+            spec.assert_str_eq(got, want, "aws doc sig")
         }
 
-        aeocha.it("s3 service signature vector") callback {
+        spec.it("s3 service signature vector") callback {
             sts = "AWS4-HMAC-SHA256\n20260606T120000Z\n20260606/us-east-1/s3/aws4_request\nabc123"
             got = sigv4.compute_signature("secret123", "20260606", "us-east-1", "s3", sts)
             want = "c23e29bc863bb2f357c1fee9281d9ed99153f5f2c52d212d6f98bd344909d3da"
-            aeocha.assert_str_eq(got, want, "s3 sig")
+            spec.assert_str_eq(got, want, "s3 sig")
         }
 
-        aeocha.it("sha256_hex_str of 'hello'") callback {
+        spec.it("sha256_hex_str of 'hello'") callback {
             got = sigv4.sha256_hex_str("hello")
             want = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-            aeocha.assert_str_eq(got, want, "sha256 hello")
+            spec.assert_str_eq(got, want, "sha256 hello")
         }
 
-        aeocha.it("string_to_sign strips AKID from scope, hashes CR") callback {
+        spec.it("string_to_sign strips AKID from scope, hashes CR") callback {
             // scope from full credential, canonical_request 'hello'
             sts = sigv4.string_to_sign("20150830T123600Z", "AKIDEXAMPLE/20150830/us-east-1/iam/aws4_request", "hello")
             want = "AWS4-HMAC-SHA256\n20150830T123600Z\n20150830/us-east-1/iam/aws4_request\n2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-            aeocha.assert_str_eq(sts, want, "string to sign")
+            spec.assert_str_eq(sts, want, "string to sign")
         }
     }
 
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }

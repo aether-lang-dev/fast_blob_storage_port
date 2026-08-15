@@ -7,11 +7,14 @@ fbs-core is being ported Go → Aether, leaf-first, replace-in-place. See
 ## Layout
 
 ```
-lib/crypto/hmac.ae          # HMAC-SHA256 (RFC 2104; std has no HMAC)
-lib/urlescape/urlescape.ae  # Go url.PathEscape equivalent (no URL codec in std)
-internal/<pkg>/<pkg>.ae  # ported packages (mirror internal/<pkg>/)
-aethertests/**/ *_test.ae   # aeocha test suites (one per module)
+lib/crypto/ctcompare.ae     # constant-time hex compare (std has no timing-safe ==)
+lib/crypto/sigv4.ae         # AWS SigV4 signing (on std.cryptography)
+internal/<pkg>/<pkg>.ae     # ported packages (mirror internal/<pkg>/)
+aethertests/**/ *_test.ae   # std.spec test suites (one per module)
 scripts/aetest.sh           # test runner
+scripts/flatlibs.sh         # generates the flat module root the build resolves against
+build.sh / bootstrap.sh     # build / install-toolchain-then-test
+AETHER_PIN / AEB_PIN        # toolchain version floors
 ```
 
 The repo is Aether-only (the Go tree was removed once the port reached parity).
@@ -21,9 +24,33 @@ only once its Aether replacement AND all its Go importers are ported, so
 
 **Module naming:** the module file is named after the import name, e.g.
 `internal/responses/responses.ae` (imported as `import responses`),
-`internal/s3compat/region.ae` (`import region`). The test runner
-symlinks every `lib/**` and `internal/**` `.ae` into a flat lib root
-by basename, so basenames must be unique across the port.
+`internal/s3compat/region.ae` (`import region`). Both the test runner and
+the build flatten every `lib/**` and `internal/**` `.ae` into a lib root
+by basename, so basenames must be unique across the port — **and must not
+collide with a std submodule that std itself imports.** That second rule
+is not theoretical: `lib/crypto/hmac.ae` shadowed `std.cryptography.hmac`
+(which `std.cryptography` delegates `hmac_sha256_hex` to as of 0.542), so
+every caller died with "'hmac_sha256_hex' is not exported from module
+'hmac'". It is now `ctcompare.ae`.
+
+## Building
+
+```sh
+./bootstrap.sh     # install ae + aeb to the pinned floors, then run the suite
+./build.sh         # build the server binary -> target/build/cmd/bin/program
+```
+
+`build.sh` regenerates `target/.libroot` (via `scripts/flatlibs.sh`) and
+runs `aeb cmd/.build.ae`. That flat root exists because **`--lib` accepts
+at most 8 entries**: this repo has more package dirs than that, and the
+compiler drops the overflow with only a warning, so listing dirs
+individually fails far downstream with a confusing "module X has no
+export Y". One generated dir sidesteps the cap entirely.
+
+`cmd/.build.ae` also carries `-lnghttp2` alongside `-lsqlite3`: opting
+into aeb's manual-link path (via `extra_source`/`link_flag`) means the
+toolchain's own link line is not inherited, and the shipped `libaether.a`
+is built with HTTP/2.
 
 ## Running tests
 
@@ -32,16 +59,21 @@ scripts/aetest.sh                                   # all suites
 scripts/aetest.sh aethertests/internal/publicread/signer_test.ae   # one
 ```
 
-The runner assembles `.ae_test_lib/` (gitignored) of symlinks —
-vendored `aeocha.ae` plus every ported module — and runs each test with
-`AETHER_LIB_DIR=.ae_test_lib ae run`. **Module resolution keys on
-`AETHER_LIB_DIR` / `--lib`, NOT `AETHER_INCLUDE_PATH`** (that var is
-ignored; debug with `ae lib-path`).
+The runner assembles `.ae_test_lib/` (gitignored) of symlinks over every
+ported module and runs each test with `AETHER_LIB_DIR=.ae_test_lib ae
+run`. The framework needs no wiring — `std.spec` ships with the
+toolchain. **Module resolution keys on `AETHER_LIB_DIR` / `--lib`, NOT
+`AETHER_INCLUDE_PATH`** (that var is ignored; debug with `ae lib-path`).
+
+Tests that link SQLite go through `scripts/aetest_sqlite.sh` (they can't
+use `ae run`, which can't pass `-lsqlite3`); `aetest.sh` routes them
+automatically.
 
 ## Toolchain facts (verified)
 
 - **MD5**: `cryptography.hash_hex("md5", data, len)` — no custom C needed.
-- **HMAC-SHA256**: hand-rolled in `lib/crypto/hmac.ae` (std excludes it).
+- **HMAC-SHA256**: `cryptography.hmac_sha256_hex` / `_bytes` (std ships it;
+  the old hand-rolled copy is gone).
 - **base64**: `cryptography.base64_encode_padded(data, len)`.
 - **SQLite** (for metadata, next): `import contrib.sqlite`, build with
   `aether.toml` `extra_sources=[".../aether_sqlite.c"]` +
@@ -50,8 +82,10 @@ ignored; debug with `ae lib-path`).
   register routes → `http_server_start_background_raw` → `sleep(200)` →
   `http_server_port` → drive with `std.http.client` v2. Timeouts are a
   typed `Duration` (`3s`, not a raw ns int).
-- aeocha `expect_http_header` is a no-op stub — verify headers with
-  `client.response_header(resp, name)` + `assert_str_eq` instead.
+- `httptest.expect_http_header` is now a real matcher (it was a no-op stub in
+  aeocha), but the existing tests verify headers with
+  `client.response_header(resp, name)` + `assert_str_eq`, which is equally
+  valid and asserts exact equality.
 
 ## Parity discipline
 
@@ -64,10 +98,10 @@ package dir so the `internal/` import is allowed) and assert against it.
 
 ## Status
 
-**Aether-only + modernized onto std (ae 0.269.0).** The Go tree is gone;
+**Aether-only + modernized onto std (ae 0.542.0).** The Go tree is gone;
 the repo leans on stdlib that landed in response to its own asks. Notable:
 - Randomness from std.cryptography CSPRNG + std.uuid (no clock-seeded PRNG).
-- HMAC/MD5/SigV4 on std.cryptography; lib/crypto/hmac is just equal_hex.
+- HMAC/MD5/SigV4 on std.cryptography; lib/crypto/ctcompare is just equal_hex.
 - Lexical paths via std.fs.clean/is_within_base; URL via std.url; XML via
   std.xml; JSON responses via std.json (incl. json.from_int for metrics).
 - Per-server state via std.http user_data (no C shim — repo is 0 hand C).

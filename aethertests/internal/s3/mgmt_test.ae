@@ -2,7 +2,7 @@
 // Boots an empty store, calls /api/setup/bootstrap, extracts the bearer
 // token from the JSON, then uses it to create a bucket and read metrics.
 
-import aeocha
+import std.spec
 import std.http
 import std.http.client
 import schema
@@ -28,7 +28,7 @@ _between(s: string, open: string, close: string) -> string {
 }
 
 main() {
-    fw = aeocha.init()
+    fw = spec.init()
 
     db, oerr = schema.open_db(":memory:")
     data_dir = string.concat("/tmp/fbs_mgmt_", cryptography.random_hex(6)!)
@@ -103,28 +103,28 @@ main() {
 
     http.server_stop(s)
 
-    aeocha.describe(fw, "setup + management") {
-        aeocha.it("status reports bootstrap required") callback {
-            aeocha.assert_eq(req_true, 1, "required true")
+    spec.describe(fw, "setup + management") {
+        spec.it("status reports bootstrap required") callback {
+            spec.assert_eq(req_true, 1, "required true")
         }
-        aeocha.it("bootstrap creates admin + returns token") callback {
-            aeocha.assert_eq(st_boot, 201, "201 created")
-            aeocha.assert_gt(string.length(token), 10, "token present")
+        spec.it("bootstrap creates admin + returns token") callback {
+            spec.assert_eq(st_boot, 201, "201 created")
+            spec.assert_gt(string.length(token), 10, "token present")
         }
-        aeocha.it("second bootstrap rejected") callback {
-            aeocha.assert_eq(st_boot2, 409, "409 conflict")
+        spec.it("second bootstrap rejected") callback {
+            spec.assert_eq(st_boot2, 409, "409 conflict")
         }
-        aeocha.it("issued token authorizes bucket create") callback {
-            aeocha.assert_eq(st_bucket, 200, "200 bucket")
+        spec.it("issued token authorizes bucket create") callback {
+            spec.assert_eq(st_bucket, 200, "200 bucket")
         }
-        aeocha.it("metrics with token") callback {
-            aeocha.assert_eq(st_metrics, 200, "200 metrics")
-            aeocha.assert_eq(has_bucket1, 1, "bucket_count 1")
+        spec.it("metrics with token") callback {
+            spec.assert_eq(st_metrics, 200, "200 metrics")
+            spec.assert_eq(has_bucket1, 1, "bucket_count 1")
         }
-        aeocha.it("metrics without token 401") callback {
-            aeocha.assert_eq(st_noauth, 401, "401 no auth")
+        spec.it("metrics without token 401") callback {
+            spec.assert_eq(st_noauth, 401, "401 no auth")
         }
     }
 
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }

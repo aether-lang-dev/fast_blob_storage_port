@@ -1,11 +1,17 @@
-// lib.crypto.hmac — constant-time hex comparison.
+// lib.crypto.ctcompare — constant-time hex comparison.
 //
 // MODERNIZED (ae 0.260.0): the HMAC-SHA256 implementation that used to
 // live here moved to std.cryptography (hmac_sha256_hex / hmac_sha256_bytes,
 // landed in response to the port's ask #631). All that remains is
 // equal_hex — a constant-time string compare for signature verification,
 // which std doesn't provide (it's not an HMAC, just a timing-safe ==).
-// The module name is kept so `import hmac` call sites are unchanged.
+//
+// RENAMED from `hmac` (ae 0.542.0): the test lib root is a FLAT root of
+// bare basenames, so an `hmac.ae` there outranked std's own
+// `std.cryptography.hmac` submodule. 0.542's std.cryptography delegates
+// hmac_sha256_hex to that submodule, so the shadow broke every caller
+// with "'hmac_sha256_hex' is not exported from module 'hmac'". The
+// module holds no HMAC any more, so the honest name also fixes the clash.
 
 import std.string
 

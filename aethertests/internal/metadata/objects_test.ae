@@ -1,11 +1,11 @@
-import aeocha
+import std.spec
 import schema
 import objects
 import contrib.sqlite
 import std.string
 
 main() {
-    fw = aeocha.init()
+    fw = spec.init()
     db, oerr = schema.open_db(":memory:")
     sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role) VALUES ('u','U','ak','sh','admin')")
     sqlite.exec(db, "INSERT INTO buckets (name, owner_id) VALUES ('b','u')")
@@ -55,32 +55,32 @@ main() {
     if derr == "" { del_ok = 1 }
     ex_after = objects.object_exists(db, "b", "k1.txt")
 
-    aeocha.describe(fw, "metadata.objects") {
-        aeocha.it("upsert insert + get") callback {
-            aeocha.assert_eq(ins_ok, 1, "inserted")
-            aeocha.assert_eq(get_ok, 1, "fields match")
+    spec.describe(fw, "metadata.objects") {
+        spec.it("upsert insert + get") callback {
+            spec.assert_eq(ins_ok, 1, "inserted")
+            spec.assert_eq(get_ok, 1, "fields match")
         }
-        aeocha.it("upsert overwrite") callback {
-            aeocha.assert_eq(over_ok, 1, "overwritten")
+        spec.it("upsert overwrite") callback {
+            spec.assert_eq(over_ok, 1, "overwritten")
         }
-        aeocha.it("exists") callback {
-            aeocha.assert_eq(ex, 1, "present")
-            aeocha.assert_eq(ex_ghost, 0, "absent")
+        spec.it("exists") callback {
+            spec.assert_eq(ex, 1, "present")
+            spec.assert_eq(ex_ghost, 0, "absent")
         }
-        aeocha.it("pagination truncation") callback {
-            aeocha.assert_eq(page_match, 1, "2 keys + truncated")
+        spec.it("pagination truncation") callback {
+            spec.assert_eq(page_match, 1, "2 keys + truncated")
         }
-        aeocha.it("start_after pagination") callback {
-            aeocha.assert_eq(after_match, 1, "keys after k2")
+        spec.it("start_after pagination") callback {
+            spec.assert_eq(after_match, 1, "keys after k2")
         }
-        aeocha.it("prefix filter") callback {
-            aeocha.assert_eq(prefix_match, 1, "only photos/")
+        spec.it("prefix filter") callback {
+            spec.assert_eq(prefix_match, 1, "only photos/")
         }
-        aeocha.it("delete") callback {
-            aeocha.assert_eq(del_ok, 1, "deleted")
-            aeocha.assert_eq(ex_after, 0, "gone")
+        spec.it("delete") callback {
+            spec.assert_eq(del_ok, 1, "deleted")
+            spec.assert_eq(ex_after, 0, "gone")
         }
     }
 
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }

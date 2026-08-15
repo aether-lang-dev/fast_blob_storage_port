@@ -11,7 +11,7 @@
 
 import std.string
 import std.cryptography
-import hmac
+import ctcompare
 import sigv4
 
 exports (
@@ -37,7 +37,7 @@ hash_secret(secret: string) -> string {
 // Constant-time-ish compare of sha256(secret) against stored hex.
 // Returns 1 if matching, 0 otherwise.
 verify_secret(secret: string, stored_hex: string) -> int {
-    return hmac.equal_hex(hash_secret(secret), stored_hex)
+    return ctcompare.equal_hex(hash_secret(secret), stored_hex)
 }
 
 // Split a bearer token "accessKeyID.secret" into (access_key, secret, err).
@@ -181,5 +181,5 @@ verify_signature(secret_key: string, amz_date: string, credential: string, date:
     cr = canonical_request(method, uri, canonical_query, canonical_headers, signed_headers_str, payload_hash)
     sts = sigv4.string_to_sign(amz_date, credential, cr)
     expected = sigv4.compute_signature(secret_key, date, region, service, sts)
-    return hmac.equal_hex(provided_sig, expected)
+    return ctcompare.equal_hex(provided_sig, expected)
 }

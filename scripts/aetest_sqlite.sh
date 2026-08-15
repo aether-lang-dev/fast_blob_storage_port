@@ -1,18 +1,19 @@
 #!/bin/sh
-# aetest_sqlite.sh — run an aeocha test that needs contrib.sqlite.
+# aetest_sqlite.sh — run a std.spec test that needs contrib.sqlite.
 #
 # SQLite-linked tests can't use `ae run` (it can't pass -lsqlite3). They
 # need `ae build` with an aether.toml carrying extra_sources +
 # link_flags, then execution of the built binary. This runner stages a
-# work dir per test: symlinks the flat lib root (aeocha + ported
-# modules) AND the aether contrib/ dir (so `import contrib.sqlite`
-# resolves), writes the toml, builds, runs.
+# work dir per test: symlinks the flat lib root (the ported modules) AND
+# the aether contrib/ dir (so `import contrib.sqlite` resolves), writes
+# the toml, builds, runs.
+#
+# std.spec needs no wiring — it ships with the toolchain.
 #
 # Usage: scripts/aetest_sqlite.sh aethertests/internal/metadata/x_test.ae
 
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-AEOCHA="${AEOCHA_REPO:-/home/paul/scm/aeocha}"
 AETHER="${AETHER_REPO:-/home/paul/scm/aether}"
 LIBDIR="$ROOT/.ae_test_lib"
 
@@ -30,7 +31,6 @@ rm -rf "$HOME/.aether/cache" 2>/dev/null || true
 
 # (Re)build the flat lib root of symlinks.
 rm -rf "$LIBDIR"; mkdir -p "$LIBDIR"
-ln -sf "$AEOCHA/aeocha.ae" "$LIBDIR/aeocha.ae"
 for f in $(find "$ROOT/lib" "$ROOT/internal" -name '*.ae' 2>/dev/null); do
     ln -sf "$f" "$LIBDIR/$(basename "$f")"
 done

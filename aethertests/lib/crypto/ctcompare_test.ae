@@ -1,0 +1,21 @@
+import std.spec
+import ctcompare
+
+// lib/crypto/ctcompare is now just the constant-time hex compare (the
+// HMAC-SHA256 moved to std.cryptography, tested upstream). SigV4 HMAC
+// parity is still asserted end-to-end in sigv4_test.ae + auth_test.ae.
+main() {
+    fw = spec.init()
+    spec.describe(fw, "ctcompare.equal_hex (constant-time compare)") {
+        spec.it("equal strings match") callback {
+            spec.assert_eq(ctcompare.equal_hex("deadbeef", "deadbeef"), 1, "eq")
+        }
+        spec.it("different strings reject") callback {
+            spec.assert_eq(ctcompare.equal_hex("deadbeef", "deadbee0"), 0, "neq")
+        }
+        spec.it("different lengths reject") callback {
+            spec.assert_eq(ctcompare.equal_hex("ab", "abcd"), 0, "len")
+        }
+    }
+    spec.run_summary(fw)
+}

@@ -1,11 +1,11 @@
-import aeocha
+import std.spec
 import schema
 import buckets
 import contrib.sqlite
 import std.string
 
 main() {
-    fw = aeocha.init()
+    fw = spec.init()
     db, oerr = schema.open_db(":memory:")
     // owner user (FK target)
     sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role) VALUES ('owner','O','ak','sh','admin')")
@@ -40,25 +40,25 @@ main() {
     del_ghost_notfound = 0
     if string.equals(del_ghost, buckets.ERR_BUCKET_NOT_FOUND) == 1 { del_ghost_notfound = 1 }
 
-    aeocha.describe(fw, "metadata.buckets") {
-        aeocha.it("create + exists") callback {
-            aeocha.assert_eq(create_ok, 1, "created")
-            aeocha.assert_eq(exists_alpha, 1, "alpha exists")
-            aeocha.assert_eq(exists_ghost, 0, "ghost absent")
+    spec.describe(fw, "metadata.buckets") {
+        spec.it("create + exists") callback {
+            spec.assert_eq(create_ok, 1, "created")
+            spec.assert_eq(exists_alpha, 1, "alpha exists")
+            spec.assert_eq(exists_ghost, 0, "ghost absent")
         }
-        aeocha.it("get_owner") callback {
-            aeocha.assert_eq(owner_match, 1, "owner matches")
-            aeocha.assert_eq(missing_is_notfound, 1, "missing -> not found")
+        spec.it("get_owner") callback {
+            spec.assert_eq(owner_match, 1, "owner matches")
+            spec.assert_eq(missing_is_notfound, 1, "missing -> not found")
         }
-        aeocha.it("list ordered by created_at") callback {
-            aeocha.assert_eq(names_match, 1, "alpha then beta")
+        spec.it("list ordered by created_at") callback {
+            spec.assert_eq(names_match, 1, "alpha then beta")
         }
-        aeocha.it("delete") callback {
-            aeocha.assert_eq(del_ok, 1, "deleted")
-            aeocha.assert_eq(exists_after_del, 0, "gone")
-            aeocha.assert_eq(del_ghost_notfound, 1, "delete ghost -> not found")
+        spec.it("delete") callback {
+            spec.assert_eq(del_ok, 1, "deleted")
+            spec.assert_eq(exists_after_del, 0, "gone")
+            spec.assert_eq(del_ghost_notfound, 1, "delete ghost -> not found")
         }
     }
 
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }

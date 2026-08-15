@@ -1,0 +1,10 @@
+# The aeb (build runner) release fbs-core's .build.ae files target.
+#
+# Floor, same contract as AETHER_PIN: the oldest aeb that understands the
+# `build.start()` / `aether.program()` node shape in cmd/.build.ae and
+# internal/publicread/.build.ae. Newer aeb on PATH is used as-is.
+#
+# aeb pins its OWN toolchain Aether separately (aeb's AETHER_PIN, 0.541.0)
+# — that is the ae which compiles aeb's `.foo.ae` orchestrator files, not
+# the ae that compiles this repo. The two are deliberately independent.
+0.281.0

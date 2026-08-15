@@ -1,4 +1,4 @@
-import aeocha
+import std.spec
 import schema
 import objects
 import storage
@@ -12,7 +12,7 @@ import std.cryptography
 extern fs_path_exists(path: string) -> int
 
 main() {
-    fw = aeocha.init()
+    fw = spec.init()
 
     db, oerr = schema.open_db(":memory:")
     sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role) VALUES ('u','U','ak','sh','admin')")
@@ -49,22 +49,22 @@ main() {
     post_orphan = fs_path_exists(orphan)
     post_tmp = fs_path_exists(looseTmp)
 
-    aeocha.describe(fw, "startup.reconcile") {
-        aeocha.it("sets up all three files") callback {
-            aeocha.assert_eq(pre_real, 1, "real present")
-            aeocha.assert_eq(pre_orphan, 1, "orphan present")
-            aeocha.assert_eq(pre_tmp, 1, "tmp present")
+    spec.describe(fw, "startup.reconcile") {
+        spec.it("sets up all three files") callback {
+            spec.assert_eq(pre_real, 1, "real present")
+            spec.assert_eq(pre_orphan, 1, "orphan present")
+            spec.assert_eq(pre_tmp, 1, "tmp present")
         }
-        aeocha.it("keeps tracked object") callback {
-            aeocha.assert_eq(post_real, 1, "real kept")
+        spec.it("keeps tracked object") callback {
+            spec.assert_eq(post_real, 1, "real kept")
         }
-        aeocha.it("removes orphan object file") callback {
-            aeocha.assert_eq(post_orphan, 0, "orphan removed")
+        spec.it("removes orphan object file") callback {
+            spec.assert_eq(post_orphan, 0, "orphan removed")
         }
-        aeocha.it("purges loose temp file") callback {
-            aeocha.assert_eq(post_tmp, 0, "tmp purged")
+        spec.it("purges loose temp file") callback {
+            spec.assert_eq(post_tmp, 0, "tmp purged")
         }
     }
 
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }

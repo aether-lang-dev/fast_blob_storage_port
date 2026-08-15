@@ -1,4 +1,4 @@
-import aeocha
+import std.spec
 import schema
 import activity
 import management
@@ -6,7 +6,7 @@ import contrib.sqlite
 import std.string
 
 main() {
-    fw = aeocha.init()
+    fw = spec.init()
     db, oerr = schema.open_db(":memory:")
     sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role, is_active) VALUES ('u1','U','ak1','sh','admin',1)")
     sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role, is_active) VALUES ('u2','V','ak2','sh','member',0)")
@@ -37,21 +37,21 @@ main() {
     if b1_bytes == 350 { b1_bytes_ok = 1 }
     b2_count = management.bucket_object_count(db, "b2")
 
-    aeocha.describe(fw, "metadata.activity + management") {
-        aeocha.it("activity count + filter") callback {
-            aeocha.assert_eq(act_total, 3, "three activities")
-            aeocha.assert_eq(act_b1, 2, "two in b1")
-            aeocha.assert_eq(create_filter_ok, 1, "two creates")
+    spec.describe(fw, "metadata.activity + management") {
+        spec.it("activity count + filter") callback {
+            spec.assert_eq(act_total, 3, "three activities")
+            spec.assert_eq(act_b1, 2, "two in b1")
+            spec.assert_eq(create_filter_ok, 1, "two creates")
         }
-        aeocha.it("aggregate metrics") callback {
-            aeocha.assert_eq(metrics_ok, 1, "buckets=2 objects=2 bytes=350 users=2 active=1")
+        spec.it("aggregate metrics") callback {
+            spec.assert_eq(metrics_ok, 1, "buckets=2 objects=2 bytes=350 users=2 active=1")
         }
-        aeocha.it("per-bucket aggregates") callback {
-            aeocha.assert_eq(b1_count, 2, "b1 has 2 objects")
-            aeocha.assert_eq(b1_bytes_ok, 1, "b1 has 350 bytes")
-            aeocha.assert_eq(b2_count, 0, "b2 empty")
+        spec.it("per-bucket aggregates") callback {
+            spec.assert_eq(b1_count, 2, "b1 has 2 objects")
+            spec.assert_eq(b1_bytes_ok, 1, "b1 has 350 bytes")
+            spec.assert_eq(b2_count, 0, "b2 empty")
         }
     }
 
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }

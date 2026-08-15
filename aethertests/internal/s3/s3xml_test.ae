@@ -1,71 +1,71 @@
-import aeocha
+import std.spec
 import s3xml
 import std.string
 
 main() {
-    fw = aeocha.init()
+    fw = spec.init()
 
-    aeocha.describe(fw, "s3xml") {
-        aeocha.it("escapes XML metacharacters") callback {
+    spec.describe(fw, "s3xml") {
+        spec.it("escapes XML metacharacters") callback {
             got = s3xml.xml_escape("a<b>&\"c'")
-            aeocha.assert_str_eq(got, "a&lt;b&gt;&amp;&quot;c&apos;", "escaped")
+            spec.assert_str_eq(got, "a&lt;b&gt;&amp;&quot;c&apos;", "escaped")
         }
 
-        aeocha.it("error XML") callback {
+        spec.it("error XML") callback {
             got = s3xml.error_xml("NoSuchKey", "The specified key does not exist.", "/b/k")
             want = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message><Resource>/b/k</Resource><RequestId>local-0001</RequestId></Error>"
-            aeocha.assert_str_eq(got, want, "error body")
+            spec.assert_str_eq(got, want, "error body")
         }
 
-        aeocha.it("bucket entry + list all buckets") callback {
+        spec.it("bucket entry + list all buckets") callback {
             e = s3xml.bucket_entry_xml("mybucket", "2026-06-06T12:00:00.000Z")
             ewant = "<Bucket><Name>mybucket</Name><CreationDate>2026-06-06T12:00:00.000Z</CreationDate></Bucket>"
-            aeocha.assert_str_eq(e, ewant, "entry")
+            spec.assert_str_eq(e, ewant, "entry")
             full = s3xml.list_all_buckets_xml("uid", "Admin", e)
             has_open = string.contains(full, "<ListAllMyBucketsResult")
             has_owner = string.contains(full, "<ID>uid</ID>")
-            aeocha.assert_eq(has_open, 1, "has result")
-            aeocha.assert_eq(has_owner, 1, "has owner")
+            spec.assert_eq(has_open, 1, "has result")
+            spec.assert_eq(has_owner, 1, "has owner")
         }
 
-        aeocha.it("list bucket v2 open/contents/close") callback {
+        spec.it("list bucket v2 open/contents/close") callback {
             o = s3xml.list_bucket_v2_open("b", "photos/", 1, 1000, 0)
             trunc_false = string.contains(o, "<IsTruncated>false</IsTruncated>")
             c = s3xml.list_bucket_contents_xml("photos/x.jpg", "2026-06-06T12:00:00.000Z", "etaghex", 42)
             has_key = string.contains(c, "<Key>photos/x.jpg</Key>")
             has_size = string.contains(c, "<Size>42</Size>")
-            aeocha.assert_eq(trunc_false, 1, "truncated false")
-            aeocha.assert_eq(has_key, 1, "contents key")
-            aeocha.assert_eq(has_size, 1, "contents size")
+            spec.assert_eq(trunc_false, 1, "truncated false")
+            spec.assert_eq(has_key, 1, "contents key")
+            spec.assert_eq(has_size, 1, "contents size")
         }
 
-        aeocha.it("initiate + complete multipart XML") callback {
+        spec.it("initiate + complete multipart XML") callback {
             i = s3xml.initiate_mpu_xml("b", "big.bin", "upid123")
             has_upid = string.contains(i, "<UploadId>upid123</UploadId>")
             cm = s3xml.complete_mpu_xml("http://host/b/big.bin", "b", "big.bin", "etag-2")
             has_etag = string.contains(cm, "etag-2")
-            aeocha.assert_eq(has_upid, 1, "upload id")
-            aeocha.assert_eq(has_etag, 1, "complete etag")
+            spec.assert_eq(has_upid, 1, "upload id")
+            spec.assert_eq(has_etag, 1, "complete etag")
         }
 
-        aeocha.it("multipart ETag matches Go") callback {
+        spec.it("multipart ETag matches Go") callback {
             // p1 = md5("part1data"), p2 = md5("part2data")
             joined = "4270a651ae8318c983b84f7e3d1f5003\nea16985855adb4ffa2146a4a51a0ecd3"
             etag, err = s3xml.multipart_etag(joined)
-            aeocha.assert_str_eq(err, "", "no error")
-            aeocha.assert_str_eq(etag, "45a05ed00244ffb025da2347e080f36a-2", "mpu etag")
+            spec.assert_str_eq(err, "", "no error")
+            spec.assert_str_eq(etag, "45a05ed00244ffb025da2347e080f36a-2", "mpu etag")
         }
 
-        aeocha.it("location constraint") callback {
+        spec.it("location constraint") callback {
             got = s3xml.location_constraint_xml("us-east-1")
             has = string.contains(got, "us-east-1</LocationConstraint>")
-            aeocha.assert_eq(has, 1, "region")
+            spec.assert_eq(has, 1, "region")
         }
-        aeocha.it("parse_delete_keys via std.xml reader") callback {
+        spec.it("parse_delete_keys via std.xml reader") callback {
             keys = s3xml.parse_delete_keys("<Delete><Object><Key>a.txt</Key></Object><Object><Key>b/c.txt</Key></Object></Delete>")
-            aeocha.assert_str_eq(keys, "a.txt\nb/c.txt", "two keys nl-joined")
+            spec.assert_str_eq(keys, "a.txt\nb/c.txt", "two keys nl-joined")
         }
     }
 
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }

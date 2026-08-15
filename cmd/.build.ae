@@ -1,8 +1,21 @@
 // aeb build node for the fbs-core server binary (Aether).
 //
 // global-handle holder. extra_source/link_flag opt into aeb's
-// manual-link path. The lib modules under lib/ + internal/ resolve
-// via the project lib path.
+// manual-link path.
+//
+// Modules are imported by BARE BASENAME (`import s3server`, `import
+// schema`) but live one-per-package under internal/ and lib/. Listing
+// each package dir with `lib(...)` does NOT work: the `--lib` search
+// path is capped at 8 entries and this repo has more, so the compiler
+// silently drops the overflow (a mere "search path is full" warning)
+// and the build dies downstream with "module X has no export Y".
+//
+// So we hand it ONE dir instead: a flat root of symlinks keyed by
+// basename — the same trick scripts/aetest.sh uses for the test suite.
+//
+// Run `scripts/flatlibs.sh` to (re)generate that root before building;
+// build.sh does it for you. It is regenerated rather than committed
+// because the symlinks are absolute to the checkout.
 
 import build
 import aether
@@ -10,8 +23,16 @@ import aether
 aeb(cap) {
     b = build.start()
     aether.program(b) {
+        lib("../target/.libroot")
+
         source("main.ae")
         extra_source("../../aether/contrib/sqlite/aether_sqlite.c")
         link_flag("-lsqlite3")
+
+        // libaether.a is built WITH HTTP/2, so its aether_h2.o pulls in
+        // nghttp2 symbols. The manual-link path (opted into by
+        // extra_source/link_flag above) doesn't inherit the toolchain's
+        // own link line, so name the dependency explicitly.
+        link_flag("-lnghttp2")
     }
 }

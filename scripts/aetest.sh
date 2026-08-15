@@ -1,12 +1,20 @@
 #!/bin/sh
-# aetest.sh — run the Aether-port aeocha test suite.
+# aetest.sh — run the Aether-port std.spec test suite.
 #
 # Module resolution in Aether keys on AETHER_LIB_DIR (NOT
 # AETHER_INCLUDE_PATH — that var is ignored). We assemble a single flat
-# lib root (.ae_test_lib/) of symlinks: vendored aeocha plus every
-# ported lib/*/*.ae and internal/*/*.ae module, addressed by bare
-# basename so `import hmac` / `import urlescape` / `import signer` etc.
-# resolve. Then run each aethertests/**/ *_test.ae through `ae run`.
+# lib root (.ae_test_lib/) of symlinks over every ported lib/*/*.ae and
+# internal/*/*.ae module, addressed by bare basename so `import signer`
+# / `import ctcompare` etc. resolve. Then run each
+# aethertests/**/ *_test.ae through `ae run`.
+#
+# The framework itself needs NO wiring: aeocha was absorbed into the
+# stdlib as std.spec (+ std.http.client.httptest), so it resolves from
+# the toolchain like any other std module.
+#
+# CAUTION: this root is FLAT and outranks std's own submodules, so a
+# module here must not share a basename with one std imports internally
+# (that clash is why lib/crypto/hmac.ae is now ctcompare.ae).
 #
 # Usage:
 #   scripts/aetest.sh                 # run all *_test.ae
@@ -16,7 +24,6 @@
 
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-AEOCHA="${AEOCHA_REPO:-/home/paul/scm/aeocha}"
 LIBDIR="$ROOT/.ae_test_lib"
 
 # The ae build cache keys on the symlink's mtime, not its target's, so
@@ -26,7 +33,6 @@ rm -rf "$HOME/.aether/cache" 2>/dev/null || true
 
 rm -rf "$LIBDIR"
 mkdir -p "$LIBDIR"
-ln -sf "$AEOCHA/aeocha.ae" "$LIBDIR/aeocha.ae"
 
 # Flatten every ported module to <basename>.ae in the lib root.
 for f in $(find "$ROOT/lib" "$ROOT/internal" -name '*.ae' 2>/dev/null); do

@@ -1,27 +1,27 @@
-import aeocha
+import std.spec
 import std.url
 
 // Was lib/urlescape parity; now asserts std.url.encode_path (#629) keeps
 // Go url.PathEscape parity — which publicread.ObjectPath signatures depend on.
 main() {
-    fw = aeocha.init()
-    aeocha.describe(fw, "std.url.encode_path (Go url.PathEscape parity)") {
-        aeocha.it("space becomes %20") callback {
-            aeocha.assert_str_eq(url.encode_path("my bucket"), "my%20bucket", "space")
+    fw = spec.init()
+    spec.describe(fw, "std.url.encode_path (Go url.PathEscape parity)") {
+        spec.it("space becomes %20") callback {
+            spec.assert_str_eq(url.encode_path("my bucket"), "my%20bucket", "space")
         }
-        aeocha.it("plus dash dot preserved") callback {
-            aeocha.assert_str_eq(url.encode_path("a+b"), "a+b", "plus")
-            aeocha.assert_str_eq(url.encode_path("a-b.txt"), "a-b.txt", "dashdot")
+        spec.it("plus dash dot preserved") callback {
+            spec.assert_str_eq(url.encode_path("a+b"), "a+b", "plus")
+            spec.assert_str_eq(url.encode_path("a-b.txt"), "a-b.txt", "dashdot")
         }
-        aeocha.it("c d.txt") callback {
-            aeocha.assert_str_eq(url.encode_path("c d.txt"), "c%20d.txt", "mixed")
+        spec.it("c d.txt") callback {
+            spec.assert_str_eq(url.encode_path("c d.txt"), "c%20d.txt", "mixed")
         }
-        aeocha.it("sub-delims kept, comma/semicolon escaped") callback {
-            aeocha.assert_str_eq(url.encode_path("@:&=+$,;"), "@:&=+$%2C%3B", "subdelims")
+        spec.it("sub-delims kept, comma/semicolon escaped") callback {
+            spec.assert_str_eq(url.encode_path("@:&=+$,;"), "@:&=+$%2C%3B", "subdelims")
         }
-        aeocha.it("tilde underscore kept, bang star escaped") callback {
-            aeocha.assert_str_eq(url.encode_path("~_.!*'()"), "~_.%21%2A%27%28%29", "specials")
+        spec.it("tilde underscore kept, bang star escaped") callback {
+            spec.assert_str_eq(url.encode_path("~_.!*'()"), "~_.%21%2A%27%28%29", "specials")
         }
     }
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }

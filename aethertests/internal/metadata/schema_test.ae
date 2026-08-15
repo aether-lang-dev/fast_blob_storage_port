@@ -1,4 +1,4 @@
-import aeocha
+import std.spec
 import schema
 import contrib.sqlite
 import std.string
@@ -15,11 +15,11 @@ _count(db: ptr, sql: string) -> int {
 }
 
 main() {
-    fw = aeocha.init()
+    fw = spec.init()
 
     db, oerr = schema.open_db(":memory:")
 
-    // NOTE: aeocha `it` closures must not capture BOTH a ptr and a string
+    // NOTE: spec `it` closures must not capture BOTH a ptr and a string
     // from the same scope (aether #624 — silent segfault). So we precompute
     // string-dependent results into int flags here and capture only db + ints.
     open_ok = 0
@@ -44,24 +44,24 @@ main() {
     if oe == "" { o_ok = 1 }
     obj_count = _count(db, "SELECT COUNT(*) FROM objects WHERE bucket_name='b1'")
 
-    aeocha.describe(fw, "metadata.schema") {
-        aeocha.it("opens and applies schema without error") callback {
-            aeocha.assert_eq(open_ok, 1, "open_db ok")
-            aeocha.assert_not_null(db, "db handle")
+    spec.describe(fw, "metadata.schema") {
+        spec.it("opens and applies schema without error") callback {
+            spec.assert_eq(open_ok, 1, "open_db ok")
+            spec.assert_not_null(db, "db handle")
         }
-        aeocha.it("creates all six tables") callback {
-            aeocha.assert_eq(table_count, 6, "six tables")
+        spec.it("creates all six tables") callback {
+            spec.assert_eq(table_count, 6, "six tables")
         }
-        aeocha.it("enforces role CHECK constraint") callback {
-            aeocha.assert_eq(role_rejected, 1, "bad role rejected")
+        spec.it("enforces role CHECK constraint") callback {
+            spec.assert_eq(role_rejected, 1, "bad role rejected")
         }
-        aeocha.it("accepts valid user + bucket + object") callback {
-            aeocha.assert_eq(u_ok, 1, "user insert")
-            aeocha.assert_eq(b_ok, 1, "bucket insert")
-            aeocha.assert_eq(o_ok, 1, "object insert")
-            aeocha.assert_eq(obj_count, 1, "one object")
+        spec.it("accepts valid user + bucket + object") callback {
+            spec.assert_eq(u_ok, 1, "user insert")
+            spec.assert_eq(b_ok, 1, "bucket insert")
+            spec.assert_eq(o_ok, 1, "object insert")
+            spec.assert_eq(obj_count, 1, "one object")
         }
     }
 
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }

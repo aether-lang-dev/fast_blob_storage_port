@@ -5,9 +5,10 @@
 // 1-process server with two routes that call responses.write_json,
 // hit them with the v2 client, and assert status / body / headers.
 
-import aeocha
+import std.spec
 import std.http
 import std.http.client
+import std.http.client.httptest
 import responses
 
 extern http_server_start_background_raw(server: ptr) -> int
@@ -35,7 +36,7 @@ _get(port: int, path: string) -> ptr {
 }
 
 main() {
-    fw = aeocha.init()
+    fw = spec.init()
 
     s = http.server_create(0)
     http.server_set_host(s, "127.0.0.1")
@@ -45,31 +46,31 @@ main() {
     sleep(200)
     port = http_server_port(s)
 
-    aeocha.describe(fw, "responses.write_json") {
+    spec.describe(fw, "responses.write_json") {
 
-        aeocha.it("default: 200, JSON body, JSON content-type, no cache header") callback {
+        spec.it("default: 200, JSON body, JSON content-type, no cache header") callback {
             resp = _get(port, "/plain")
-            aeocha.expect_http_status(resp, 200, "status 200")
-            aeocha.expect_http_body_contains(resp, "\"hello\":\"world\"", "body")
+            httptest.expect_http_status(resp, 200, "status 200")
+            httptest.expect_http_body_contains(resp, "\"hello\":\"world\"", "body")
             ct = client.response_header(resp, "Content-Type")
-            aeocha.assert_str_eq(ct, "application/json; charset=utf-8", "content-type")
+            spec.assert_str_eq(ct, "application/json; charset=utf-8", "content-type")
             cc = client.response_header(resp, "Cache-Control")
-            aeocha.assert_str_eq(cc, "", "no cache-control on default")
+            spec.assert_str_eq(cc, "", "no cache-control on default")
             client.response_free(resp)
         }
 
-        aeocha.it("no-store: 201, body, Cache-Control no-store, Pragma no-cache") callback {
+        spec.it("no-store: 201, body, Cache-Control no-store, Pragma no-cache") callback {
             resp = _get(port, "/nostore")
-            aeocha.expect_http_status(resp, 201, "status 201")
-            aeocha.expect_http_body_contains(resp, "\"created\":true", "body")
+            httptest.expect_http_status(resp, 201, "status 201")
+            httptest.expect_http_body_contains(resp, "\"created\":true", "body")
             cc = client.response_header(resp, "Cache-Control")
-            aeocha.assert_str_eq(cc, "no-store", "cache-control")
+            spec.assert_str_eq(cc, "no-store", "cache-control")
             pragma = client.response_header(resp, "Pragma")
-            aeocha.assert_str_eq(pragma, "no-cache", "pragma")
+            spec.assert_str_eq(pragma, "no-cache", "pragma")
             client.response_free(resp)
         }
     }
 
     http.server_stop(s)
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }

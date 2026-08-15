@@ -1,0 +1,15 @@
+# The Aether release fbs-core is built and tested against.
+#
+# A FLOOR, not a preference: the oldest Aether that can compile this
+# repo's sources and run its suite. Anything newer on PATH is used as-is.
+#
+# Why 0.542.0 — the port's test suite is `std.spec` (+
+# `std.http.client.httptest`), the stdlib absorption of the retired
+# aeocha framework. `std.spec` landed in 0.538.0 and the process/HTTP
+# matcher modules alongside it, so 0.538.0 is the language floor; we pin
+# to 0.542.0 because that is the release the suite is verified green on,
+# and because 0.541.0 carries the weak-`aether_lib_meta` fix that aeb's
+# multi-TU `--emit=lib` link shape needs (see aeb's own AETHER_PIN).
+#
+# Bump when this repo starts calling a primitive an older Aether lacks.
+0.542.0

@@ -1,9 +1,9 @@
-import aeocha
+import std.spec
 import auth
 import std.string
 
 main() {
-    fw = aeocha.init()
+    fw = spec.init()
 
     // bearer
     h = auth.hash_secret("mypassword")
@@ -41,31 +41,31 @@ main() {
     sig_match = auth.verify_signature("testsecret", "20260606T120000Z", "AKID/20260606/us-east-1/s3/aws4_request", "20260606", "us-east-1", "s3", "GET", "/mybucket/key.txt", "", chs, "host;x-amz-content-sha256;x-amz-date", "UNSIGNED-PAYLOAD", expected)
     sig_bad = auth.verify_signature("wrongsecret", "20260606T120000Z", "AKID/20260606/us-east-1/s3/aws4_request", "20260606", "us-east-1", "s3", "GET", "/mybucket/key.txt", "", chs, "host;x-amz-content-sha256;x-amz-date", "UNSIGNED-PAYLOAD", expected)
 
-    aeocha.describe(fw, "auth") {
-        aeocha.it("bearer hash + verify") callback {
-            aeocha.assert_eq(vok, 1, "correct secret verifies")
-            aeocha.assert_eq(vbad, 0, "wrong secret rejected")
+    spec.describe(fw, "auth") {
+        spec.it("bearer hash + verify") callback {
+            spec.assert_eq(vok, 1, "correct secret verifies")
+            spec.assert_eq(vbad, 0, "wrong secret rejected")
         }
-        aeocha.it("bearer split") callback {
-            aeocha.assert_eq(bearer_split_ok, 1, "split ok")
-            aeocha.assert_eq(bearer_malformed, 1, "no dot -> malformed")
+        spec.it("bearer split") callback {
+            spec.assert_eq(bearer_split_ok, 1, "split ok")
+            spec.assert_eq(bearer_malformed, 1, "no dot -> malformed")
         }
-        aeocha.it("credential parse") callback {
-            aeocha.assert_eq(cred_ok, 1, "valid credential")
-            aeocha.assert_eq(cred_bad, 1, "short date rejected")
+        spec.it("credential parse") callback {
+            spec.assert_eq(cred_ok, 1, "valid credential")
+            spec.assert_eq(cred_bad, 1, "short date rejected")
         }
-        aeocha.it("signed headers require host") callback {
-            aeocha.assert_eq(sh_ok, 1, "host present")
-            aeocha.assert_eq(sh_bad, 0, "host absent")
+        spec.it("signed headers require host") callback {
+            spec.assert_eq(sh_ok, 1, "host present")
+            spec.assert_eq(sh_bad, 0, "host absent")
         }
-        aeocha.it("authorization header parse") callback {
-            aeocha.assert_eq(authhdr_ok, 1, "parsed cred/signed/sig")
+        spec.it("authorization header parse") callback {
+            spec.assert_eq(authhdr_ok, 1, "parsed cred/signed/sig")
         }
-        aeocha.it("end-to-end signature verify (Go parity)") callback {
-            aeocha.assert_eq(sig_match, 1, "valid signature matches")
-            aeocha.assert_eq(sig_bad, 0, "wrong secret fails")
+        spec.it("end-to-end signature verify (Go parity)") callback {
+            spec.assert_eq(sig_match, 1, "valid signature matches")
+            spec.assert_eq(sig_bad, 0, "wrong secret fails")
         }
     }
 
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }

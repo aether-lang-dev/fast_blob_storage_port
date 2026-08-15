@@ -2,7 +2,7 @@
 // module against an in-memory DB + temp data dir, seed a bearer user +
 // bucket, and drive the full object lifecycle over HTTP.
 
-import aeocha
+import std.spec
 import std.http
 import std.http.client
 import schema
@@ -60,7 +60,7 @@ _req_stream_get(port: int, path: string) -> ptr {
 }
 
 main() {
-    fw = aeocha.init()
+    fw = spec.init()
 
     db, oerr = schema.open_db(":memory:")
     // seed bearer user: secret_hash = sha256("secretvalue")
@@ -220,58 +220,58 @@ main() {
 
     http.server_stop(s)
 
-    aeocha.describe(fw, "s3 server end-to-end") {
-        aeocha.it("rejects unauthenticated") callback {
-            aeocha.assert_eq(st_unauth, 403, "403 no auth")
+    spec.describe(fw, "s3 server end-to-end") {
+        spec.it("rejects unauthenticated") callback {
+            spec.assert_eq(st_unauth, 403, "403 no auth")
         }
-        aeocha.it("create bucket") callback {
-            aeocha.assert_eq(st_create, 200, "200 created")
+        spec.it("create bucket") callback {
+            spec.assert_eq(st_create, 200, "200 created")
         }
-        aeocha.it("put object returns ETag") callback {
-            aeocha.assert_eq(st_put, 200, "200 put")
-            aeocha.assert_eq(etag_ok, 1, "ETag is md5 of body (incremental digest)")
+        spec.it("put object returns ETag") callback {
+            spec.assert_eq(st_put, 200, "200 put")
+            spec.assert_eq(etag_ok, 1, "ETag is md5 of body (incremental digest)")
         }
-        aeocha.it("get object returns body") callback {
-            aeocha.assert_eq(st_get, 200, "200 get")
-            aeocha.assert_eq(body_ok, 1, "body roundtrip")
+        spec.it("get object returns body") callback {
+            spec.assert_eq(st_get, 200, "200 get")
+            spec.assert_eq(body_ok, 1, "body roundtrip")
         }
-        aeocha.it("head object") callback {
-            aeocha.assert_eq(st_head, 200, "200 head")
+        spec.it("head object") callback {
+            spec.assert_eq(st_head, 200, "200 head")
         }
-        aeocha.it("list objects shows key") callback {
-            aeocha.assert_eq(st_list, 200, "200 list")
-            aeocha.assert_eq(list_has_key, 1, "key in listing")
+        spec.it("list objects shows key") callback {
+            spec.assert_eq(st_list, 200, "200 list")
+            spec.assert_eq(list_has_key, 1, "key in listing")
         }
-        aeocha.it("missing object 404") callback {
-            aeocha.assert_eq(st_missing, 404, "404 missing")
+        spec.it("missing object 404") callback {
+            spec.assert_eq(st_missing, 404, "404 missing")
         }
-        aeocha.it("delete then gone") callback {
-            aeocha.assert_eq(st_del, 204, "204 delete")
-            aeocha.assert_eq(st_gone, 404, "404 after delete")
+        spec.it("delete then gone") callback {
+            spec.assert_eq(st_del, 204, "204 delete")
+            spec.assert_eq(st_gone, 404, "404 after delete")
         }
-        aeocha.it("multipart upload assembles") callback {
-            aeocha.assert_eq(st_init, 200, "200 initiate")
-            aeocha.assert_eq(st_p1, 200, "200 part1")
-            aeocha.assert_eq(st_p2, 200, "200 part2")
-            aeocha.assert_eq(st_complete, 200, "200 complete")
-            aeocha.assert_eq(st_assembled, 200, "200 get assembled")
-            aeocha.assert_eq(asm_ok, 1, "parts concatenated in order")
+        spec.it("multipart upload assembles") callback {
+            spec.assert_eq(st_init, 200, "200 initiate")
+            spec.assert_eq(st_p1, 200, "200 part1")
+            spec.assert_eq(st_p2, 200, "200 part2")
+            spec.assert_eq(st_complete, 200, "200 complete")
+            spec.assert_eq(st_assembled, 200, "200 get assembled")
+            spec.assert_eq(asm_ok, 1, "parts concatenated in order")
         }
-        aeocha.it("copy object") callback {
-            aeocha.assert_eq(st_copy, 200, "200 copy")
-            aeocha.assert_eq(copy_ok, 1, "copy body matches source")
+        spec.it("copy object") callback {
+            spec.assert_eq(st_copy, 200, "200 copy")
+            spec.assert_eq(copy_ok, 1, "copy body matches source")
         }
-        aeocha.it("large object streams + roundtrips") callback {
-            aeocha.assert_eq(st_big_put, 200, "200 big put")
-            aeocha.assert_eq(st_big_get, 200, "200 big get")
-            aeocha.assert_eq(big_ok, 1, "200KB body byte-identical")
+        spec.it("large object streams + roundtrips") callback {
+            spec.assert_eq(st_big_put, 200, "200 big put")
+            spec.assert_eq(st_big_get, 200, "200 big get")
+            spec.assert_eq(big_ok, 1, "200KB body byte-identical")
         }
-        aeocha.it("bulk delete") callback {
-            aeocha.assert_eq(st_bulk, 200, "200 bulk delete")
-            aeocha.assert_eq(bulk_ok, 1, "delete result lists key")
-            aeocha.assert_eq(st_bulk_gone, 404, "objects gone")
+        spec.it("bulk delete") callback {
+            spec.assert_eq(st_bulk, 200, "200 bulk delete")
+            spec.assert_eq(bulk_ok, 1, "delete result lists key")
+            spec.assert_eq(st_bulk_gone, 404, "objects gone")
         }
     }
 
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }

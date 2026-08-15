@@ -1,12 +1,12 @@
-import aeocha
+import std.spec
 import region
 
 main() {
-    fw = aeocha.init()
-    aeocha.describe(fw, "s3compat") {
-        aeocha.it("REGION is us-east-1") callback {
-            aeocha.assert_str_eq(region.REGION, "us-east-1", "region")
+    fw = spec.init()
+    spec.describe(fw, "s3compat") {
+        spec.it("REGION is us-east-1") callback {
+            spec.assert_str_eq(region.REGION, "us-east-1", "region")
         }
     }
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }

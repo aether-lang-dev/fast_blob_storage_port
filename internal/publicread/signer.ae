@@ -15,7 +15,7 @@
 
 import std.string
 import std.cryptography
-import hmac
+import ctcompare
 import std.url
 
 exports (
@@ -71,7 +71,7 @@ verify(secret: string, path: string, expires_str: string, signature_hex: string,
         return ERR_MALFORMED
     }
     want = sign_path(secret, path, expires)
-    if hmac.equal_hex(sig, want) != 1 {
+    if ctcompare.equal_hex(sig, want) != 1 {
         return ERR_INVALID
     }
     return ""

@@ -1,11 +1,11 @@
-import aeocha
+import std.spec
 import schema
 import multipart
 import contrib.sqlite
 import std.string
 
 main() {
-    fw = aeocha.init()
+    fw = spec.init()
     db, oerr = schema.open_db(":memory:")
     sqlite.exec(db, "INSERT INTO users (id, display_name, access_key_id, secret_hash, role) VALUES ('u','U','ak','sh','admin')")
     sqlite.exec(db, "INSERT INTO buckets (name, owner_id) VALUES ('b','u')")
@@ -54,26 +54,26 @@ main() {
     del_ok = 0
     if de == "" && multipart.mpu_part_count(db, "up1") == 0 { del_ok = 1 }
 
-    aeocha.describe(fw, "metadata.multipart") {
-        aeocha.it("create + status") callback {
-            aeocha.assert_eq(create_ok, 1, "created")
-            aeocha.assert_eq(status_ok, 1, "active status")
+    spec.describe(fw, "metadata.multipart") {
+        spec.it("create + status") callback {
+            spec.assert_eq(create_ok, 1, "created")
+            spec.assert_eq(status_ok, 1, "active status")
         }
-        aeocha.it("add parts") callback {
-            aeocha.assert_eq(parts_ok, 1, "parts added")
-            aeocha.assert_eq(pc, 2, "two parts")
-            aeocha.assert_eq(paths_ok, 1, "ordered paths")
-            aeocha.assert_eq(replace_ok, 1, "replace returns old path")
+        spec.it("add parts") callback {
+            spec.assert_eq(parts_ok, 1, "parts added")
+            spec.assert_eq(pc, 2, "two parts")
+            spec.assert_eq(paths_ok, 1, "ordered paths")
+            spec.assert_eq(replace_ok, 1, "replace returns old path")
         }
-        aeocha.it("claim lifecycle") callback {
-            aeocha.assert_eq(claim_ok, 1, "claimed")
-            aeocha.assert_eq(second_claim_blocked, 1, "second claim blocked")
-            aeocha.assert_eq(add_after_claim_blocked, 1, "add after claim blocked")
+        spec.it("claim lifecycle") callback {
+            spec.assert_eq(claim_ok, 1, "claimed")
+            spec.assert_eq(second_claim_blocked, 1, "second claim blocked")
+            spec.assert_eq(add_after_claim_blocked, 1, "add after claim blocked")
         }
-        aeocha.it("delete cascades parts") callback {
-            aeocha.assert_eq(del_ok, 1, "deleted + parts gone")
+        spec.it("delete cascades parts") callback {
+            spec.assert_eq(del_ok, 1, "deleted + parts gone")
         }
     }
 
-    aeocha.run_summary(fw)
+    spec.run_summary(fw)
 }
