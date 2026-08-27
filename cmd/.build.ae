@@ -14,25 +14,26 @@
 // basename — the same trick scripts/aetest.sh uses for the test suite.
 //
 // Run `scripts/flatlibs.sh` to (re)generate that root before building;
-// build.sh does it for you. It is regenerated rather than committed
+// bldr.sh does it for you. It is regenerated rather than committed
 // because the symlinks are absolute to the checkout.
 
-import build
+import bldr
 import aether
 
 aeb(cap) {
-    b = build.start()
-    aether.program(b) {
-        lib("../target/.libroot")
-
-        source("main.ae")
-        extra_source("../../aether/contrib/sqlite/aether_sqlite.c")
-        link_flag("-lsqlite3")
-
-        // libaether.a is built WITH HTTP/2, so its aether_h2.o pulls in
-        // nghttp2 symbols. The manual-link path (opted into by
-        // extra_source/link_flag above) doesn't inherit the toolchain's
-        // own link line, so name the dependency explicitly.
-        link_flag("-lnghttp2")
+    bldr.build() {
+        aether.program() {
+            lib("../target/.libroot")
+    
+            source("main.ae")
+            extra_source("../../aether/contrib/sqlite/aether_sqlite.c")
+            link_flag("-lsqlite3")
+    
+            // libaether.a is built WITH HTTP/2, so its aether_h2.o pulls in
+            // nghttp2 symbols. The manual-link path (opted into by
+            // extra_source/link_flag above) doesn't inherit the toolchain's
+            // own link line, so name the dependency explicitly.
+            link_flag("-lnghttp2")
+        }
     }
 }
