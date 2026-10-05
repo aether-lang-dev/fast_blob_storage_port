@@ -30,13 +30,13 @@ main() {
     bdir = string.concat(data_dir, "/b")
     fs.mkdir_p(bdir)
     orphan = string.concat(bdir, "/orphan-uuid-xyz")
-    fs.write_atomic(orphan, "junk", 4)
+    fs.write_atomic(orphan, string.bytes("junk"))
 
     // a loose temp file
     tmp = string.concat(data_dir, "/.tmp")
     fs.mkdir_p(tmp)
     looseTmp = string.concat(tmp, "/stale.tmp")
-    fs.write_atomic(looseTmp, "stale", 5)
+    fs.write_atomic(looseTmp, string.bytes("stale"))
 
     // sanity: all three exist
     pre_real = fs_path_exists(real_full)
@@ -66,5 +66,5 @@ main() {
         }
     }
 
-    spec.run_summary(fw)
+    return spec.run_summary(fw)
 }

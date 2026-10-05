@@ -29,7 +29,7 @@ LIBDIR="$ROOT/.ae_test_lib"
 # The ae build cache keys on the symlink's mtime, not its target's, so
 # edits to a real module behind a symlinked lib entry are missed. Clear
 # the cache each run so symlinked-lib edits always take effect.
-rm -rf "$HOME/.aether/cache" 2>/dev/null || true
+rm -rf "${AETHER_CACHE_DIR:-$HOME/.aether/cache}" 2>/dev/null || true
 
 rm -rf "$LIBDIR"
 mkdir -p "$LIBDIR"

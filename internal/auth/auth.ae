@@ -31,7 +31,7 @@ const ERR_INACTIVE       = "auth: user is inactive"
 
 // sha256 hex of the secret (the stored secret_hash form).
 hash_secret(secret: string) -> string {
-    return cryptography.sha256_hex(secret, string.length(secret))!
+    return cryptography.sha256_hex(string.bytes(secret))!
 }
 
 // Constant-time-ish compare of sha256(secret) against stored hex.

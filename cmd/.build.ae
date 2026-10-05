@@ -1,7 +1,6 @@
 // aeb build node for the fbs-core server binary (Aether).
 //
-// global-handle holder. extra_source/link_flag opt into aeb's
-// manual-link path.
+// global-handle holder. link_flag opts into aeb's manual-link path.
 //
 // Modules are imported by BARE BASENAME (`import s3server`, `import
 // schema`) but live one-per-package under internal/ and lib/. Listing
@@ -14,7 +13,7 @@
 // basename — the same trick scripts/aetest.sh uses for the test suite.
 //
 // Run `scripts/flatlibs.sh` to (re)generate that root before building;
-// bldr.sh does it for you. It is regenerated rather than committed
+// build.sh does it for you. It is regenerated rather than committed
 // because the symlinks are absolute to the checkout.
 
 import bldr
@@ -22,17 +21,26 @@ import aether
 
 aeb(cap) {
     bldr.build() {
+        root = _get("root")
         aether.program() {
             lib("../target/.libroot")
     
             source("main.ae")
-            extra_source("../../aether/contrib/sqlite/aether_sqlite.c")
+            // contrib.sqlite's @link names -laether_sqlite, the veneer archive
+            // a release toolchain doesn't ship; scripts/sqlite_veneer.sh
+            // builds it from the toolchain's own contrib source into
+            // target/contrib (build.sh runs it). Anchored on the repo root:
+            // gcc runs from aeb's cwd, not this dir, so a relative -L misses.
+            link_flag("-L${root}/target/contrib")
             link_flag("-lsqlite3")
-    
+
             // libaether.a is built WITH HTTP/2, so its aether_h2.o pulls in
             // nghttp2 symbols. The manual-link path (opted into by
-            // extra_source/link_flag above) doesn't inherit the toolchain's
-            // own link line, so name the dependency explicitly.
+            // link_flag above) resolves zlib/openssl/pcre2 via pkg-config but
+            // not nghttp2, so name the dependency explicitly. Homebrew keeps it
+            // under its prefix, so that -L is needed on macOS and harmless
+            // where the directory does not exist.
+            link_flag("-L/opt/homebrew/lib")
             link_flag("-lnghttp2")
         }
     }

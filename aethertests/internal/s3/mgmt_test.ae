@@ -55,7 +55,7 @@ main() {
     // 2. bootstrap
     rb = client.request("POST", "${base}${port}/api/setup/bootstrap")
     client.set_timeout(rb, 5s)
-    client.set_body(rb, "{}", 2, "application/json")
+    client.set_body(rb, string.bytes("{}"), "application/json")
     resp_b, e2 = client.send_request(rb)
     client.request_free(rb)
     st_boot = client.response_status(resp_b)
@@ -66,7 +66,7 @@ main() {
     // 3. second bootstrap -> 409
     rb2 = client.request("POST", "${base}${port}/api/setup/bootstrap")
     client.set_timeout(rb2, 5s)
-    client.set_body(rb2, "{}", 2, "application/json")
+    client.set_body(rb2, string.bytes("{}"), "application/json")
     resp_b2, e3 = client.send_request(rb2)
     client.request_free(rb2)
     st_boot2 = client.response_status(resp_b2)
@@ -126,5 +126,5 @@ main() {
         }
     }
 
-    spec.run_summary(fw)
+    return spec.run_summary(fw)
 }

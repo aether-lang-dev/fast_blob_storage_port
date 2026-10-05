@@ -13,6 +13,7 @@ internal/<pkg>/<pkg>.ae     # ported packages (mirror internal/<pkg>/)
 aethertests/**/ *_test.ae   # std.spec test suites (one per module)
 scripts/aetest.sh           # test runner
 scripts/flatlibs.sh         # generates the flat module root the build resolves against
+scripts/sqlite_veneer.sh    # builds contrib.sqlite's -laether_sqlite archive into target/contrib
 build.sh / bootstrap.sh     # build / install-toolchain-then-test
 AETHER_PIN / AEB_PIN        # toolchain version floors
 ```
@@ -47,10 +48,19 @@ compiler drops the overflow with only a warning, so listing dirs
 individually fails far downstream with a confusing "module X has no
 export Y". One generated dir sidesteps the cap entirely.
 
-`cmd/.build.ae` also carries `-lnghttp2` alongside `-lsqlite3`: opting
-into aeb's manual-link path (via `extra_source`/`link_flag`) means the
-toolchain's own link line is not inherited, and the shipped `libaether.a`
-is built with HTTP/2.
+`cmd/.build.ae` also carries `-lnghttp2` (plus `-L/opt/homebrew/lib` for
+macOS) alongside `-lsqlite3`: opting into aeb's manual-link path (via
+`link_flag`) means the toolchain's own link line is not inherited — aeb
+resolves zlib/openssl/pcre2 itself but not nghttp2 — and the shipped
+`libaether.a` is built with HTTP/2.
+
+`contrib.sqlite` declares `@link("-laether_sqlite -lsqlite3 -lm")`. A source
+install's `make contrib` builds that veneer archive; a **release** install
+(get.sh — the preferred route) ships the contrib source but not the archive,
+so `build.sh` first runs `scripts/sqlite_veneer.sh`, which compiles the
+toolchain's own `contrib/sqlite/aether_sqlite.c` into `target/contrib/`
+(rebuilt when the toolchain's copy changes); `cmd/.build.ae` puts that on
+`-L` via `${root}`. No sibling `aether` checkout is needed any more.
 
 ## Running tests
 
@@ -66,18 +76,33 @@ toolchain. **Module resolution keys on `AETHER_LIB_DIR` / `--lib`, NOT
 `AETHER_INCLUDE_PATH`** (that var is ignored; debug with `ae lib-path`).
 
 Tests that link SQLite go through `scripts/aetest_sqlite.sh` (they can't
-use `ae run`, which can't pass `-lsqlite3`); `aetest.sh` routes them
-automatically.
+use `ae run`, which can't pass link flags); `aetest.sh` routes them
+automatically. It uses the same `target/contrib` veneer archive as the
+build. Both runners clear the ae build cache first (`$AETHER_CACHE_DIR`,
+default `~/.aether/cache`).
+
+Each suite ends `return spec.run_summary(fw)`: since Aether 0.612
+`run_summary` returns its verdict instead of exiting, so a bare call makes a
+failing suite exit 0 (measured) and the runners would report green.
 
 ## Toolchain facts (verified)
 
-- **MD5**: `cryptography.hash_hex("md5", data, len)` — no custom C needed.
+- **Byte payloads are `byte[]` slices** (Aether 0.758, #2301): std calls
+  that take bytes (`fs.write_atomic`, `fs.pwrite`, `cryptography.*_hex`,
+  `hmac_sha256_*`, `digest_update`, client `set_body`, ...) take one slice,
+  not `(data, len)`. For a string use `string.bytes(s)`; for an owned
+  length-preserving string with a known length, `string.bytes(s)[0..n]`.
+  `http.request_body` returns a RAW `char*` that may hold NULs, which
+  `string.bytes` would strlen short — bound the bare pointer instead:
+  `(string.aether_string_raw_ptr(p) as byte[])[0..n]` (storage's `_view`).
+- **MD5**: `cryptography.md5_hex(bytes)` / `hash_hex("md5", bytes)` — no
+  custom C needed.
 - **HMAC-SHA256**: `cryptography.hmac_sha256_hex` / `_bytes` (std ships it;
   the old hand-rolled copy is gone).
-- **base64**: `cryptography.base64_encode_padded(data, len)`.
-- **SQLite** (for metadata, next): `import contrib.sqlite`, build with
-  `aether.toml` `extra_sources=[".../aether_sqlite.c"]` +
-  `[build] link_flags = "-lsqlite3"`. Verified working.
+- **base64**: `encoding.base64_encode_padded(bytes)` (std.encoding).
+- **SQLite**: `import contrib.sqlite` (resolves from a release install since
+  0.741); link needs `-laether_sqlite` (see `scripts/sqlite_veneer.sh`) +
+  `-lsqlite3`.
 - **HTTP**: in-process test = `server_create(0)` → `server_set_host` →
   register routes → `http_server_start_background_raw` → `sleep(200)` →
   `http_server_port` → drive with `std.http.client` v2. Timeouts are a
@@ -98,7 +123,8 @@ package dir so the `internal/` import is allowed) and assert against it.
 
 ## Status
 
-**Aether-only + modernized onto std (ae 0.542.0).** The Go tree is gone;
+**Aether-only + modernized onto std (ae 0.778.0 + aeb v0.325; was 0.542.0
+— see AETHER_PIN for what the upgrade changed).** The Go tree is gone;
 the repo leans on stdlib that landed in response to its own asks. Notable:
 - Randomness from std.cryptography CSPRNG + std.uuid (no clock-seeded PRNG).
 - HMAC/MD5/SigV4 on std.cryptography; lib/crypto/ctcompare is just equal_hex.

@@ -19,7 +19,7 @@ const EMPTY_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852
 
 // SHA-256 hex of a string (length-aware).
 sha256_hex_str(s: string) -> string {
-    return cryptography.sha256_hex(s, string.length(s))!
+    return cryptography.sha256_hex(string.bytes(s))!
 }
 
 // Derive the SigV4 signing key chain and sign string_to_sign.
@@ -28,11 +28,11 @@ sha256_hex_str(s: string) -> string {
 // Each intermediate HMAC output is the raw 32-byte key for the next.
 compute_signature(secret_key: string, date: string, region: string, service: string, sts: string) -> string {
     k0 = string.concat("AWS4", secret_key)
-    k1, l1, e1 = cryptography.hmac_sha256_bytes(k0, string.length(k0), date, string.length(date))
-    k2, l2, e2 = cryptography.hmac_sha256_bytes(k1, l1, region, string.length(region))
-    k3, l3, e3 = cryptography.hmac_sha256_bytes(k2, l2, service, string.length(service))
-    k4, l4, e4 = cryptography.hmac_sha256_bytes(k3, l3, TERMINATOR, string.length(TERMINATOR))
-    return cryptography.hmac_sha256_hex(k4, l4, sts, string.length(sts))!
+    k1, l1, e1 = cryptography.hmac_sha256_bytes(string.bytes(k0), string.bytes(date))
+    k2, l2, e2 = cryptography.hmac_sha256_bytes(string.bytes(k1)[0..l1], string.bytes(region))
+    k3, l3, e3 = cryptography.hmac_sha256_bytes(string.bytes(k2)[0..l2], string.bytes(service))
+    k4, l4, e4 = cryptography.hmac_sha256_bytes(string.bytes(k3)[0..l3], string.bytes(TERMINATOR))
+    return cryptography.hmac_sha256_hex(string.bytes(k4)[0..l4], string.bytes(sts))!
 }
 
 // Build the string-to-sign. `credential_scope` may be the full

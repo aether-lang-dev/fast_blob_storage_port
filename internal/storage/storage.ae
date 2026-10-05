@@ -218,10 +218,19 @@ stream_begin(data_dir: string, bucket: string, key: string) -> {
     return file, sp, ""
 }
 
+// `length` bytes of `data` as the byte[] slice std.fs takes (#2301). `data`
+// may be an owned AetherString (read_binary, request_body_read) OR the raw
+// char* http.request_body hands back, whose bytes can include NULs — so
+// string.bytes(), which measures a raw pointer with strlen, would cut it
+// short. Unwrap to the bare pointer and bound it by the explicit length.
+_view(data: string, length: int) -> byte[] {
+    return (string.aether_string_raw_ptr(data) as byte[])[0..length]
+}
+
 // Append `length` bytes of `data` at `offset` to a streaming file.
 // Returns "" or error.
 stream_write(file: ptr, data: string, length: int, offset: long) -> string {
-    n, err = pwrite(file, data, length, offset)
+    n, err = pwrite(file, _view(data, length), offset)
     return err
 }
 
@@ -264,7 +273,7 @@ write(data_dir: string, bucket: string, key: string, data: string, length: int) 
     if derr != "" {
         return "", _zero_size(), derr
     }
-    werr = write_atomic(full, data, length)
+    werr = write_atomic(full, _view(data, length))
     if werr != "" {
         return "", _zero_size(), werr
     }
@@ -345,7 +354,7 @@ write_part(data_dir: string, upload_id: string, part_number: int, data: string, 
     pn = string.from_int(part_number)
     fname = string.concat(pn, string.concat(".", cryptography.random_hex(8)!))
     full = join_clean(part_dir, fname)
-    werr = write_atomic(full, data, length)
+    werr = write_atomic(full, _view(data, length))
     if werr != "" {
         return "", _zero_size(), werr
     }
@@ -395,7 +404,7 @@ assemble_parts(data_dir: string, bucket: string, key: string, part_full_paths: p
     if derr != "" {
         return "", _zero_size(), derr
     }
-    werr = write_atomic(full, combined, total_len)
+    werr = write_atomic(full, _view(combined, total_len))
     if werr != "" {
         return "", _zero_size(), werr
     }

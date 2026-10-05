@@ -12,4 +12,31 @@
 # multi-TU `--emit=lib` link shape needs (see aeb's own AETHER_PIN).
 #
 # Bump when this repo starts calling a primitive an older Aether lacks.
-0.542.0
+#
+# Raised 0.542.0 -> 0.778.0 (2026-10-05). A TRACKING/policy move to the
+# family-wide floor every Aether repo moved to the same day -- but one that
+# the code now genuinely needs, because the port had to change to build:
+#
+#   1. Aether 0.758 (#2301): the byte-payload std calls take a `byte[]` slice
+#      (the length travels with it) instead of (ptr/string, len) pairs.
+#      fbs-core calls the slice forms of fs.write_atomic / fs.pwrite,
+#      cryptography.md5_hex / sha256_hex / hmac_sha256_hex /
+#      hmac_sha256_bytes / digest_update and http client set_body
+#      (string.bytes(s), or string.aether_string_raw_ptr(p) as byte[] bounded
+#      by an explicit length where the body is http.request_body's raw char*
+#      that can hold NULs), so it CANNOT COMPILE below 0.758.
+#   2. 0.612: spec.run_summary returns its verdict instead of exiting; the
+#      suites now `return spec.run_summary(fw)` so a failing spec exits
+#      non-zero (the bare call was measured exiting 0 on a failing spec).
+#      On an ae below 0.612 that return hands main() garbage.
+#   3. 0.741 (#2208): release installs ship contrib/, so `import
+#      contrib.sqlite` resolves from a get.sh toolchain with no aether source
+#      checkout. (The veneer archive it links, -laether_sqlite, is still not
+#      shipped: scripts/sqlite_veneer.sh builds it from that contrib source.)
+#
+# So the code's own minimum is now 0.758.0; 0.778.0 is the family floor and
+# the release it is verified on (macOS arm64): ./build.sh builds the server,
+# scripts/aetest.sh runs all 19 suites green (94 specs + large_sizes, the
+# same as 0.542.0 gave on the pre-port code), and a real server round trip
+# (bootstrap, bucket, PUT/GET/HEAD/LIST/copy/multipart/DELETE) matches 0.542.
+0.778.0

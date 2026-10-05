@@ -50,7 +50,7 @@ canonical_string(path: string, expires_unix: long) -> string {
 // SignPath: HMAC-SHA256(secret, canonical) as lowercase hex.
 sign_path(secret: string, path: string, expires_unix: long) -> string {
     canon = canonical_string(path, expires_unix)
-    sig, e = cryptography.hmac_sha256_hex(secret, string.length(secret), canon, string.length(canon))
+    sig, e = cryptography.hmac_sha256_hex(string.bytes(secret), string.bytes(canon))
     return sig
 }
 

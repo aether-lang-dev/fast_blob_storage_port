@@ -50,9 +50,11 @@ set_state(db: ptr, data_dir: string) -> ptr {
 
 // ---- helpers ----
 
-// md5 hex of a length-aware body.
+// md5 hex of a length-aware body. `body` may be http.request_body's raw
+// char* (embedded NULs allowed), so bound the bare pointer by `length`
+// rather than letting string.bytes() strlen it.
 _etag(body: string, length: int) -> string {
-    return cryptography.md5_hex(body, length)!
+    return cryptography.md5_hex((string.aether_string_raw_ptr(body) as byte[])[0..length])!
 }
 
 _send_error(res: ptr, status: int, code: string, msg: string, resource: string) {
@@ -375,7 +377,7 @@ _put_object_impl(ctx: *AppCtx, req: ptr, res: ptr) {
                 werr = storage.stream_write(file, chunk, n, off)
                 if werr != "" { wok = 0  off = total }
                 else {
-                    cryptography.digest_update(dctx, chunk, n)
+                    cryptography.digest_update(dctx, string.bytes(chunk)[0..n])
                     off = off + n
                 }
             }

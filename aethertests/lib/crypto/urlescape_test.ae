@@ -23,5 +23,5 @@ main() {
             spec.assert_str_eq(url.encode_path("~_.!*'()"), "~_.%21%2A%27%28%29", "specials")
         }
     }
-    spec.run_summary(fw)
+    return spec.run_summary(fw)
 }

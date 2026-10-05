@@ -17,5 +17,5 @@ main() {
             spec.assert_eq(ctcompare.equal_hex("ab", "abcd"), 0, "len")
         }
     }
-    spec.run_summary(fw)
+    return spec.run_summary(fw)
 }

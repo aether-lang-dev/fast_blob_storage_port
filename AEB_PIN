@@ -1,10 +1,20 @@
 # The aeb (build runner) release fbs-core's .build.ae files target.
 #
 # Floor, same contract as AETHER_PIN: the oldest aeb that understands the
-# `build.start()` / `aether.program()` node shape in cmd/.build.ae and
-# internal/publicread/.build.ae. Newer aeb on PATH is used as-is.
+# `bldr.build()` / `aether.program()` node shape in cmd/.build.ae. Newer
+# aeb on PATH is used as-is.
 #
-# aeb pins its OWN toolchain Aether separately (aeb's AETHER_PIN, 0.541.0)
+# aeb pins its OWN toolchain Aether separately (aeb v0.325's AETHER_PIN, 0.766.0)
 # — that is the ae which compiles aeb's `.foo.ae` orchestrator files, not
 # the ae that compiles this repo. The two are deliberately independent.
-0.281.0
+#
+# Raised 0.281.0 -> 0.325.0 (2026-10-05), with AETHER_PIN's move to 0.778.0:
+# a TRACKING/policy move to the family-wide aeb (install tag v0.325), and a
+# real one too -- cmd/.build.ae is now aeb's Shape A (`import bldr`,
+# `aeb(cap) { bldr.build() { aether.program() {...} } }`, with `build`
+# retired for `bldr`), which v0.281 rejects ("Undefined function
+# 'bldr.build'"), and it anchors its -L on `_get("root")`. aeb's manual link
+# also reads contrib.sqlite's `@link` back from the generated C, which is
+# what puts -laether_sqlite on the line (see scripts/sqlite_veneer.sh).
+# Verified: ./build.sh with aeb v0.325 + ae 0.778.0 builds the server.
+0.325.0

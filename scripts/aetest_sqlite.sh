@@ -1,12 +1,15 @@
 #!/bin/sh
 # aetest_sqlite.sh — run a std.spec test that needs contrib.sqlite.
 #
-# SQLite-linked tests can't use `ae run` (it can't pass -lsqlite3). They
-# need `ae build` with an aether.toml carrying extra_sources +
-# link_flags, then execution of the built binary. This runner stages a
-# work dir per test: symlinks the flat lib root (the ported modules) AND
-# the aether contrib/ dir (so `import contrib.sqlite` resolves), writes
-# the toml, builds, runs.
+# SQLite-linked tests can't use `ae run` (it can't pass link flags). They
+# need `ae build` with an aether.toml carrying link_flags, then execution
+# of the built binary. This runner stages a work dir per test over the
+# flat lib root (the ported modules), writes the toml, builds, runs.
+#
+# `import contrib.sqlite` resolves from the toolchain itself (release
+# installs ship contrib/ since 0.741.0). Its @link names -laether_sqlite,
+# the veneer archive a release doesn't ship, so scripts/sqlite_veneer.sh
+# builds it into target/contrib and the toml puts that on -L.
 #
 # std.spec needs no wiring — it ships with the toolchain.
 #
@@ -14,7 +17,6 @@
 
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-AETHER="${AETHER_REPO:-/home/paul/scm/aether}"
 LIBDIR="$ROOT/.ae_test_lib"
 
 if [ -z "$1" ]; then echo "usage: $0 <test.ae>"; exit 2; fi
@@ -27,7 +29,7 @@ if ! pkg-config --exists sqlite3 2>/dev/null; then
     fi
 fi
 
-rm -rf "$HOME/.aether/cache" 2>/dev/null || true
+rm -rf "${AETHER_CACHE_DIR:-$HOME/.aether/cache}" 2>/dev/null || true
 
 # (Re)build the flat lib root of symlinks.
 rm -rf "$LIBDIR"; mkdir -p "$LIBDIR"
@@ -35,16 +37,17 @@ for f in $(find "$ROOT/lib" "$ROOT/internal" -name '*.ae' 2>/dev/null); do
     ln -sf "$f" "$LIBDIR/$(basename "$f")"
 done
 
+VENEER="$("$ROOT/scripts/sqlite_veneer.sh")"
+
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
-ln -s "$AETHER/contrib" "$WORK/contrib"
 cp "$TEST" "$WORK/probe.ae"
 
 # Server integration tests also need the appstate.c global-handle source.
 APPSTATE="$ROOT/internal/s3/appstate.c"
-EXTRA_APPSTATE=""
+EXTRA_SOURCES=""
 if grep -q 'appstate_' "$TEST" 2>/dev/null || grep -lq 'appstate_' "$ROOT/internal/s3/"*.ae 2>/dev/null; then
     cp "$APPSTATE" "$WORK/appstate.c"
-    EXTRA_APPSTATE=', "appstate.c"'
+    EXTRA_SOURCES='extra_sources = ["appstate.c"]'
 fi
 
 cat > "$WORK/aether.toml" <<EOF
@@ -55,10 +58,10 @@ version = "0.0.0"
 [[bin]]
 name = "probe"
 path = "probe.ae"
-extra_sources = ["contrib/sqlite/aether_sqlite.c"${EXTRA_APPSTATE}]
+${EXTRA_SOURCES}
 
 [build]
-link_flags = "-lsqlite3"
+link_flags = "-L${VENEER} -lsqlite3"
 EOF
 
 printf '\n=== %s ===\n' "$1"

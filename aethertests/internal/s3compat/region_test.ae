@@ -8,5 +8,5 @@ main() {
             spec.assert_str_eq(region.REGION, "us-east-1", "region")
         }
     }
-    spec.run_summary(fw)
+    return spec.run_summary(fw)
 }

@@ -40,7 +40,7 @@ _req(method: string, port: int, path: string, body: string) -> ptr {
     client.set_timeout(r, 5s)
     client.set_header(r, "Authorization", "Bearer AKIATEST.secretvalue")
     if string.length(body) > 0 {
-        client.set_body(r, body, string.length(body), "application/octet-stream")
+        client.set_body(r, string.bytes(body), "application/octet-stream")
     }
     resp, err = client.send_request(r)
     client.request_free(r)
@@ -273,5 +273,5 @@ main() {
         }
     }
 
-    spec.run_summary(fw)
+    return spec.run_summary(fw)
 }
