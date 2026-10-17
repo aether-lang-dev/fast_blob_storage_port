@@ -26,4 +26,12 @@
 # parameters"), and ./build.sh is verified with an aeb built from that
 # commit. Raise this to the first aeb release containing db99a6f. Until
 # then, build aeb from main (`make install` in an aeb checkout).
-0.325.0
+#
+# Raised 0.325.0 -> 0.327.0 (2026-10-18), with AETHER_PIN's move to 0.824.0.
+# A real floor, not tracking: v0.327 is the first aeb release containing
+# db99a6f, and every earlier one fails to compile its bldr under the Aether
+# this repo needs (0.818+, E0902), so ./build.sh cannot run on them. (v0.327
+# pins its own toolchain Aether at 0.823.0.) Verified: ./build.sh with aeb
+# v0.327 built from its tag + ae 0.824.0 builds the server, on macOS arm64,
+# aether-linux arm64 and ae-x64.
+0.327.0

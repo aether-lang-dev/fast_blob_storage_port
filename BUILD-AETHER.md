@@ -123,7 +123,7 @@ package dir so the `internal/` import is allowed) and assert against it.
 
 ## Status
 
-**Aether-only + modernized onto std (ae 0.823.0 + aeb from main, db99a6f; was 0.542.0
+**Aether-only + modernized onto std (ae 0.824.0 + aeb v0.327; was 0.542.0
 — see AETHER_PIN for what the upgrade changed).** The Go tree is gone;
 the repo leans on stdlib that landed in response to its own asks. Notable:
 - Randomness from std.cryptography CSPRNG + std.uuid (no clock-seeded PRNG).

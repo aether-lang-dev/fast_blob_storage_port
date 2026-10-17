@@ -54,4 +54,13 @@
 # (bootstrap, bucket, PUT/GET of a NUL-bearing body, HEAD, LIST, copy,
 # DELETE, 404 after delete) behaves. ./build.sh needs an aeb newer than
 # v0.326 (see AEB_PIN).
-0.823.0
+#
+# Raised 0.823.0 -> 0.824.0 (2026-10-18). A TRACKING bump with the family,
+# not one the code needs (its own minimum stays 0.818.0): nothing here is
+# named like a generated helper (now under _aether_) or spawn_<Actor>, and no
+# closure keeps a slice of its frame (0.824's new E0900 cases). Verified on
+# 0.824.0 built from its tag, with aeb v0.327 (macOS arm64, aether-linux
+# arm64, ae-x64 gcc -Werror): scripts/aetest.sh runs all 19 suites green (94
+# specs + large_sizes), ./build.sh builds the server with no C warnings, and
+# the same live round trip behaves (bytes identical, 404 after delete).
+0.824.0
