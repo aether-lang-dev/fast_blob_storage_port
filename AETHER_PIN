@@ -39,4 +39,19 @@
 # scripts/aetest.sh runs all 19 suites green (94 specs + large_sizes, the
 # same as 0.542.0 gave on the pre-port code), and a real server round trip
 # (bootstrap, bucket, PUT/GET/HEAD/LIST/copy/multipart/DELETE) matches 0.542.
-0.778.0
+#
+# Raised 0.778.0 -> 0.823.0 (2026-10-17). Again a family-wide move (Paul:
+# the whole family on 0.823.0), and again one the code needs:
+#
+#   4. 0.818 (#2926): a `ptr` parameter a function keeps must say
+#      `@keep ptr` (E0902). s3server.set_state stores the sqlite handle in
+#      the AppCtx it returns, so it is `db: @keep ptr`, which no Aether
+#      before 0.818 parses. The code's own minimum is now 0.818.0.
+#
+# Verified on 0.823.0 (macOS arm64, aether-linux arm64, ae-x64 gcc
+# -Werror): scripts/aetest.sh runs all 19 suites green (94 specs +
+# large_sizes), ./build.sh builds the server, and a live round trip
+# (bootstrap, bucket, PUT/GET of a NUL-bearing body, HEAD, LIST, copy,
+# DELETE, 404 after delete) behaves. ./build.sh needs an aeb newer than
+# v0.326 (see AEB_PIN).
+0.823.0

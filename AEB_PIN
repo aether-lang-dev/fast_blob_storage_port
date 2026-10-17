@@ -17,4 +17,13 @@
 # also reads contrib.sqlite's `@link` back from the generated C, which is
 # what puts -laether_sqlite on the line (see scripts/sqlite_veneer.sh).
 # Verified: ./build.sh with aeb v0.325 + ae 0.778.0 builds the server.
+#
+# NOT raised with AETHER_PIN's move to 0.823.0 (2026-10-17), because there is
+# no aeb release to raise it to. Under Aether 0.818+, every released aeb's
+# bldr module fails to compile (E0902, bldr/module.ae:2004, a borrowed `ptr`
+# captured by a closure), v0.326 included, so ./build.sh dies before reaching
+# cmd/. aeb's main has the fix (db99a6f, "Aether 0.818.0: @keep ptr
+# parameters"), and ./build.sh is verified with an aeb built from that
+# commit. Raise this to the first aeb release containing db99a6f. Until
+# then, build aeb from main (`make install` in an aeb checkout).
 0.325.0

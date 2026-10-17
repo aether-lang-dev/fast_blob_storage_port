@@ -41,7 +41,7 @@ struct AppCtx {
 
 // Build the per-server context. Allocated once in main(); lives for the
 // process (OS reclaims on exit), so never freed.
-set_state(db: ptr, data_dir: string) -> ptr {
+set_state(db: @keep ptr, data_dir: string) -> ptr {
     ctx = heap.new(AppCtx)
     ctx.db = db
     ctx.data_dir = data_dir
