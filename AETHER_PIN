@@ -63,4 +63,28 @@
 # arm64, ae-x64 gcc -Werror): scripts/aetest.sh runs all 19 suites green (94
 # specs + large_sizes), ./build.sh builds the server with no C warnings, and
 # the same live round trip behaves (bytes identical, 404 after delete).
-0.824.0
+#
+# Raised 0.824.0 -> 0.931.0 (2026-11-20). A FLOOR MOVE: the code had to change
+# for 0.931.0, and none of it builds on the old pin. What 0.931.0 forced:
+#
+#   5. `string.aether_string_raw_ptr` is no longer exported from std.string
+#      (E0303). The three sites that bounded a raw pointer by hand now use
+#      `string.bytes(s)[0..n]` for owned strings, and the multipart part
+#      handler takes `http.request_body_bytes(req)` (a byte[] bounded by the
+#      real body length, so NULs survive) and storage.write_part takes that
+#      byte[] directly.
+#   6. `http.request_body_length` returns a long, so the streaming PUT's
+#      running offset is declared `long off` (E0200, narrowing).
+#   7. `fs.file_close` became `fs.close` (0.850.0), which also returns the
+#      close error; storage.stream_finish now reports it.
+#
+# The code's own minimum is therefore 0.931.0 for item 5 alone; it is the
+# release this is verified on. Verified on 0.931.0 with aeb v0.348 (Linux
+# x86_64, cachyos): scripts/aetest.sh runs all 19 suites green (94 specs),
+# ./build.sh builds the server, and a live round trip (bootstrap, bucket,
+# PUT/GET/HEAD of a NUL-bearing body, a 512000-byte streamed body and an empty
+# body, a two-part multipart upload with NULs, DELETE, 404 after delete) gives
+# byte-identical bodies and ETags equal to the md5 of the bytes. The build
+# also links on macOS arm64. Not run: the live server on macOS, the old
+# platforms of earlier bumps (aether-linux arm64, ae-x64 gcc -Werror).
+0.931.0

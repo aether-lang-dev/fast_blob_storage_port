@@ -33,15 +33,11 @@ aeb(cap) {
             // gcc runs from aeb's cwd, not this dir, so a relative -L misses.
             link_flag("-L${root}/target/contrib")
             link_flag("-lsqlite3")
-
-            // libaether.a is built WITH HTTP/2, so its aether_h2.o pulls in
-            // nghttp2 symbols. The manual-link path (opted into by
-            // link_flag above) resolves zlib/openssl/pcre2 via pkg-config but
-            // not nghttp2, so name the dependency explicitly. Homebrew keeps it
-            // under its prefix, so that -L is needed on macOS and harmless
-            // where the directory does not exist.
-            link_flag("-L/opt/homebrew/lib")
-            link_flag("-lnghttp2")
+            // No -lnghttp2 / -L/opt/homebrew/lib here: since aeb v0.336 the
+            // manual link of a program reads the system libraries libaether
+            // needs (nghttp2 included) from `ae cflags --libs`. Verified on
+            // v0.348: it links, with libnghttp2 present, on Linux x86_64 and
+            // macOS arm64, without either flag.
         }
     }
 }

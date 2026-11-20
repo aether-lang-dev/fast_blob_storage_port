@@ -219,12 +219,13 @@ stream_begin(data_dir: string, bucket: string, key: string) -> {
 }
 
 // `length` bytes of `data` as the byte[] slice std.fs takes (#2301). `data`
-// may be an owned AetherString (read_binary, request_body_read) OR the raw
-// char* http.request_body hands back, whose bytes can include NULs — so
-// string.bytes(), which measures a raw pointer with strlen, would cut it
-// short. Unwrap to the bare pointer and bound it by the explicit length.
+// is an owned AetherString (read_binary, request_body_read, a concatenation
+// of those), whose own length string.bytes() reports, binary-safe. The raw
+// char* http.request_body hands back is NOT such a string (strlen would cut
+// it at a NUL): the request-body caller passes http.request_body_bytes to
+// write_part instead.
 _view(data: string, length: int) -> byte[] {
-    return (string.aether_string_raw_ptr(data) as byte[])[0..length]
+    return string.bytes(data)[0..length]
 }
 
 // Append `length` bytes of `data` at `offset` to a streaming file.
@@ -237,7 +238,8 @@ stream_write(file: ptr, data: string, length: int, offset: long) -> string {
 // Flush + close a streaming file. Returns "" or error.
 stream_finish(file: ptr) -> string {
     ferr = fsync(file)
-    file_close(file)
+    cerr = close(file)
+    if ferr == "" { return cerr }
     return ferr
 }
 
@@ -341,7 +343,7 @@ _part_dir(data_dir: string, upload_id: string) -> string {
 // Write one multipart part. Returns (storage_path, size, "") or
 // ("", 0, err). The part keeps a unique filename so concurrent uploads
 // of the same part number don't race.
-write_part(data_dir: string, upload_id: string, part_number: int, data: string, length: int) -> (string, long, string) {
+write_part(data_dir: string, upload_id: string, part_number: int, data: byte[]) -> (string, long, string) {
     verr = _validate_upload_id(upload_id)
     if verr != "" {
         return "", _zero_size(), verr
@@ -354,7 +356,7 @@ write_part(data_dir: string, upload_id: string, part_number: int, data: string, 
     pn = string.from_int(part_number)
     fname = string.concat(pn, string.concat(".", cryptography.random_hex(8)!))
     full = join_clean(part_dir, fname)
-    werr = write_atomic(full, _view(data, length))
+    werr = write_atomic(full, data)
     if werr != "" {
         return "", _zero_size(), werr
     }
@@ -362,7 +364,7 @@ write_part(data_dir: string, upload_id: string, part_number: int, data: string, 
     rel = join_clean(".tmp", "multipart")
     rel = join_clean(rel, upload_id)
     rel = join_clean(rel, fname)
-    return rel, _as_long(length), ""
+    return rel, _as_long(data.len), ""
 }
 
 // Assemble ordered parts into a final object. part_paths is a DirList-

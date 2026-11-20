@@ -48,11 +48,12 @@ compiler drops the overflow with only a warning, so listing dirs
 individually fails far downstream with a confusing "module X has no
 export Y". One generated dir sidesteps the cap entirely.
 
-`cmd/.build.ae` also carries `-lnghttp2` (plus `-L/opt/homebrew/lib` for
-macOS) alongside `-lsqlite3`: opting into aeb's manual-link path (via
-`link_flag`) means the toolchain's own link line is not inherited — aeb
-resolves zlib/openssl/pcre2 itself but not nghttp2 — and the shipped
-`libaether.a` is built with HTTP/2.
+`cmd/.build.ae` names only `-lsqlite3` (and the veneer's `-L`). Opting into
+aeb's manual-link path (via `link_flag`) once dropped the toolchain's own link
+line, so nghttp2 (the shipped `libaether.a` is built with HTTP/2) had to be
+named by hand; since aeb v0.336 aeb reads those system libraries from
+`ae cflags --libs`, and the hand-written `-lnghttp2` (and the macOS
+`-L/opt/homebrew/lib`) were removed.
 
 `contrib.sqlite` declares `@link("-laether_sqlite -lsqlite3 -lm")`. A source
 install's `make contrib` builds that veneer archive; a **release** install
@@ -93,8 +94,9 @@ failing suite exit 0 (measured) and the runners would report green.
   not `(data, len)`. For a string use `string.bytes(s)`; for an owned
   length-preserving string with a known length, `string.bytes(s)[0..n]`.
   `http.request_body` returns a RAW `char*` that may hold NULs, which
-  `string.bytes` would strlen short — bound the bare pointer instead:
-  `(string.aether_string_raw_ptr(p) as byte[])[0..n]` (storage's `_view`).
+  `string.bytes` would strlen short — take `http.request_body_bytes(req)`
+  instead (a byte[] bounded by the real body length; `string.aether_string_raw_ptr`
+  is no longer exported from `std.string`).
 - **MD5**: `cryptography.md5_hex(bytes)` / `hash_hex("md5", bytes)` — no
   custom C needed.
 - **HMAC-SHA256**: `cryptography.hmac_sha256_hex` / `_bytes` (std ships it;
@@ -123,7 +125,7 @@ package dir so the `internal/` import is allowed) and assert against it.
 
 ## Status
 
-**Aether-only + modernized onto std (ae 0.824.0 + aeb v0.327; was 0.542.0
+**Aether-only + modernized onto std (ae 0.931.0 + aeb v0.348; was 0.542.0
 — see AETHER_PIN for what the upgrade changed).** The Go tree is gone;
 the repo leans on stdlib that landed in response to its own asks. Notable:
 - Randomness from std.cryptography CSPRNG + std.uuid (no clock-seeded PRNG).

@@ -18,7 +18,7 @@
 # Env overrides:
 #   PREFIX        install prefix                 (default: $HOME/.local; no sudo)
 #   AETHER_REF    ae tag/branch/SHA to install   (default: the AETHER_PIN tag)
-#   AEB_REF       aeb tag/branch/SHA to install  (default: latest tag)
+#   AEB_REF       aeb tag/branch/SHA to install  (default: the AEB_PIN tag)
 #   MIN_AE        minimum acceptable ae version  (default: read from AETHER_PIN)
 # Extra args pass through to scripts/aetest.sh (e.g. ./bootstrap.sh one_test.ae).
 set -euo pipefail
@@ -37,6 +37,8 @@ ae_version() { ae --version 2>/dev/null | head -n1 | sed -E 's/^ae ([0-9]+\.[0-9
 read_pin() { grep -vE '^\s*(#|$)' "$1" | head -n1 | tr -d '[:space:]'; }
 
 PIN_AE="$(read_pin "$HERE/AETHER_PIN")"
+PIN_AEB="$(read_pin "$HERE/AEB_PIN")"
+# the pin file reads 0.348.0; the release tag is v0.348
 MIN_AE="${MIN_AE:-$PIN_AE}"
 
 # fetch_run URL : download an installer to a temp file and run it under sh,
@@ -68,8 +70,8 @@ fi
 if command -v aeb >/dev/null 2>&1; then
     say "aeb already on PATH — skipping"
 else
-    say "installing aeb via install.sh (AEB_REF=${AEB_REF:-latest}, PREFIX=$PREFIX)"
-    AEB_REF="${AEB_REF:-}" AETHER="$(command -v ae)" fetch_run "$AEB_INSTALL_URL" || die "aeb install failed (install.sh)."
+    say "installing aeb via install.sh (AEB_REF=${AEB_REF:-v${PIN_AEB%.*}}, PREFIX=$PREFIX)"
+    AEB_REF="${AEB_REF:-v${PIN_AEB%.*}}" AETHER="$(command -v ae)" fetch_run "$AEB_INSTALL_URL" || die "aeb install failed (install.sh)."
     command -v aeb >/dev/null 2>&1 || die "aeb installed but not on PATH — ensure $PREFIX/bin is on PATH."
 fi
 say "using aeb: $(command -v aeb)"

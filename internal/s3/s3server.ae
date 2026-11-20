@@ -50,11 +50,11 @@ set_state(db: @keep ptr, data_dir: string) -> ptr {
 
 // ---- helpers ----
 
-// md5 hex of a length-aware body. `body` may be http.request_body's raw
-// char* (embedded NULs allowed), so bound the bare pointer by `length`
-// rather than letting string.bytes() strlen it.
-_etag(body: string, length: int) -> string {
-    return cryptography.md5_hex((string.aether_string_raw_ptr(body) as byte[])[0..length])!
+// md5 hex of a body's bytes. Callers hand a byte[] bounded by the real
+// length: http.request_body_bytes for a request body (embedded NULs
+// allowed), string.bytes(s)[0..n] for an owned AetherString read back.
+_etag(body: byte[]) -> string {
+    return cryptography.md5_hex(body)!
 }
 
 _send_error(res: ptr, status: int, code: string, msg: string, resource: string) {
@@ -325,7 +325,7 @@ _copy_object_impl(ctx: *AppCtx, req: ptr, res: ptr, copy_source: string) {
         _send_error(res, 400, "InvalidRequest", werr, dpath)
         return
     }
-    etag = _etag(data, dlen)
+    etag = _etag(string.bytes(data)[0..dlen])
     oid = uuid.v4()!
     objects.object_upsert(db, oid, dbucket, dkey, nsize, etag, srcobj.content_type, nsp, "", "")
     http.response_set_status(res, 200)
@@ -366,7 +366,7 @@ _put_object_impl(ctx: *AppCtx, req: ptr, res: ptr) {
     }
     dctx, dnerr = cryptography.digest_new("md5")
     total = http.request_body_length(req)
-    off = 0
+    long off = 0
     wok = 1
     while off < total {
         chunk, n, rerr = http.request_body_read(req, off, 65536)
@@ -564,14 +564,13 @@ _upload_part_impl(ctx: *AppCtx, req: ptr, res: ptr) {
         _send_error(res, 400, "InvalidRequest", "Invalid partNumber.", path)
         return
     }
-    body = http.request_body(req)
-    blen = http.request_body_length(req)
-    sp, size, werr = storage.write_part(data_dir, upload_id, pn, body, blen)
+    body = http.request_body_bytes(req)
+    sp, size, werr = storage.write_part(data_dir, upload_id, pn, body)
     if werr != "" {
         _send_error(res, 400, "InvalidRequest", werr, path)
         return
     }
-    etag = _etag(body, blen)
+    etag = _etag(body)
     old, aerr2 = multipart.mpu_add_part(db, upload_id, pn, size, etag, sp)
     if aerr2 != "" {
         _send_error(res, 404, "NoSuchUpload", "The specified multipart upload does not exist.", path)
@@ -634,7 +633,7 @@ _complete_mpu_impl(ctx: *AppCtx, req: ptr, res: ptr, upload_id: string) {
     }
     // ETag = md5 of assembled object (simplified; Go uses md5-of-md5s).
     data, dlen, rerr = storage.read(data_dir, sp)
-    etag = _etag(data, dlen)
+    etag = _etag(string.bytes(data)[0..dlen])
     oid = uuid.v4()!
     objects.object_upsert(db, oid, bucket, key, total, etag, ct, sp, "", "")
     // cleanup parts + upload record

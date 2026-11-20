@@ -34,4 +34,13 @@
 # pins its own toolchain Aether at 0.823.0.) Verified: ./build.sh with aeb
 # v0.327 built from its tag + ae 0.824.0 builds the server, on macOS arm64,
 # aether-linux arm64 and ae-x64.
-0.327.0
+#
+# Raised 0.327.0 -> 0.348.0 (2026-11-20), with AETHER_PIN's move to 0.931.0.
+# A FLOOR MOVE: aeb v0.344 and older cannot run on Aether 0.931.0 (their own
+# tools fail to compile, E0202), and v0.327 cannot either. v0.348 is the first
+# release that carries the one-toolchain-per-run fix and fetches 0.931.0.
+# Verified: ./build.sh with the TAGGED v0.348 (aeb's get.sh, AEB_REF=v0.348)
+# + ae 0.931.0 builds the server on Linux x86_64 and macOS arm64. It also
+# makes the hand-written -lnghttp2 in cmd/.build.ae unnecessary (aeb reads the
+# system libraries libaether needs since v0.336); that flag was removed.
+0.348.0
