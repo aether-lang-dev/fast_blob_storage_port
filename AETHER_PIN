@@ -93,4 +93,9 @@
 # Raised 0.935.0 -> 0.936.0 (2026-11-22): a tracking-only bump, no new primitive
 # needed and no source change. Verified on ae-x64 (Ubuntu 22.04 x86_64): scripts/aetest.sh, 94 specs
 # green, and ./build.sh builds the server (no live round trip).
-0.936.0
+# Raised 0.936.0 -> 0.939.0 (2026-11-23): a tracking-only bump, no new primitive
+# needed and no source change (nothing here uses the removed std.http.client
+# process-wide pool). Verified on ae-x64 (Ubuntu 22.04 x86_64) with a 0.939.0
+# release install: scripts/aetest.sh, 94 specs green, and ./build.sh builds the
+# server (no live round trip).
+0.939.0
