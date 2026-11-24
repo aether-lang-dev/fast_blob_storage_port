@@ -98,4 +98,9 @@
 # process-wide pool). Verified on ae-x64 (Ubuntu 22.04 x86_64) with a 0.939.0
 # release install: scripts/aetest.sh, 94 specs green, and ./build.sh builds the
 # server (no live round trip).
-0.939.0
+# Raised 0.939.0 -> 0.941.0 (2026-11-24): a tracking-only bump, no new primitive
+# needed and no source change (nothing here matches the HTTP client's changed
+# error wording). Verified on ae-x64 (Ubuntu 22.04 x86_64) with a 0.941.0
+# release install: scripts/aetest.sh, 94 specs green, and ./build.sh builds the
+# server with aeb v0.348 (no live round trip).
+0.941.0
