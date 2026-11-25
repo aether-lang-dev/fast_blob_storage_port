@@ -103,4 +103,10 @@
 # error wording). Verified on ae-x64 (Ubuntu 22.04 x86_64) with a 0.941.0
 # release install: scripts/aetest.sh, 94 specs green, and ./build.sh builds the
 # server with aeb v0.348 (no live round trip).
-0.941.0
+# Raised 0.941.0 -> 0.944.0 (2026-11-25): a tracking-only bump, no new primitive
+# needed and no source change (0.942.0-0.944.0 are performance only: runtime actor
+# batching, inline std.math scalars, inline slice-view release). Verified with a
+# 0.944.0 release install (aeb v0.348): scripts/aetest.sh, 94 specs green, and
+# ./build.sh builds the server, on cachyos and on ghostbsd (FreeBSD needs
+# C_INCLUDE_PATH=/usr/local/include LIBRARY_PATH=/usr/local/lib for sqlite3.h); no live round trip.
+0.944.0
