@@ -109,4 +109,8 @@
 # 0.944.0 release install (aeb v0.348): scripts/aetest.sh, 94 specs green, and
 # ./build.sh builds the server, on cachyos and on ghostbsd (FreeBSD needs
 # C_INCLUDE_PATH=/usr/local/include LIBRARY_PATH=/usr/local/lib for sqlite3.h); no live round trip.
-0.945.0
+# Raised 0.945.0 -> 0.946.0 (2026-11-25): a tracking-only bump, no new
+# primitive needed and no source change. Verified with a 0.946.0 release install (aeb v0.348):
+# scripts/aetest.sh, 18 spec files all passing, on cachyos (needs AETHER_CONTRIB pointed at the
+# release's share/aether/contrib when run from a copy). Not re-run on ghostbsd (no sqlite3.h).
+0.946.0
