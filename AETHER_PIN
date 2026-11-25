@@ -109,4 +109,4 @@
 # 0.944.0 release install (aeb v0.348): scripts/aetest.sh, 94 specs green, and
 # ./build.sh builds the server, on cachyos and on ghostbsd (FreeBSD needs
 # C_INCLUDE_PATH=/usr/local/include LIBRARY_PATH=/usr/local/lib for sqlite3.h); no live round trip.
-0.944.0
+0.945.0
