@@ -15,7 +15,7 @@ scripts/aetest.sh           # test runner
 scripts/flatlibs.sh         # generates the flat module root the build resolves against
 scripts/sqlite_veneer.sh    # builds contrib.sqlite's -laether_sqlite archive into target/contrib
 build.sh / bootstrap.sh     # build / install-toolchain-then-test
-AETHER_PIN / AEB_PIN        # toolchain version floors
+AETHER_MIN / AETHER_PIN / AEB_PIN  # ae floor / ae tracking pin / aeb floor
 ```
 
 The repo is Aether-only (the Go tree was removed once the port reached parity).
@@ -125,7 +125,7 @@ package dir so the `internal/` import is allowed) and assert against it.
 
 ## Status
 
-**Aether-only + modernized onto std (ae 0.931.0 + aeb v0.348; was 0.542.0
+**Aether-only + modernized onto std (ae floor 0.931.0, tracking pin 0.949.0, aeb v0.348; was 0.542.0
 — see AETHER_PIN for what the upgrade changed).** The Go tree is gone;
 the repo leans on stdlib that landed in response to its own asks. Notable:
 - Randomness from std.cryptography CSPRNG + std.uuid (no clock-seeded PRNG).

@@ -1,7 +1,17 @@
-# The Aether release fbs-core is built and tested against.
+# The Aether release fbs-core is installed at and verified against.
 #
-# A FLOOR, not a preference: the oldest Aether that can compile this
-# repo's sources and run its suite. Anything newer on PATH is used as-is.
+# A TRACKING PIN, not a floor. bootstrap.sh installs this release when no
+# acceptable ae is on PATH, and every family re-pin moves it. The floor, the
+# oldest Aether that can compile this repo's sources, is in AETHER_MIN
+# (0.931.0: items 1-5 below), and bootstrap.sh accepts any ae at or above
+# that. (Until 2026-11-28 this file called itself the floor while holding the
+# tracking value, and bootstrap.sh enforced it as the minimum; the two roles
+# are now two files.)
+#
+# Bump this on each Aether release (tracking). Bump AETHER_MIN only when this
+# repo starts calling a primitive an older Aether lacks.
+#
+# History of the original floor (0.542.0):
 #
 # Why 0.542.0 — the port's test suite is `std.spec` (+
 # `std.http.client.httptest`), the stdlib absorption of the retired
@@ -10,8 +20,6 @@
 # to 0.542.0 because that is the release the suite is verified green on,
 # and because 0.541.0 carries the weak-`aether_lib_meta` fix that aeb's
 # multi-TU `--emit=lib` link shape needs (see aeb's own AETHER_PIN).
-#
-# Bump when this repo starts calling a primitive an older Aether lacks.
 #
 # Raised 0.542.0 -> 0.778.0 (2026-10-05). A TRACKING/policy move to the
 # family-wide floor every Aether repo moved to the same day -- but one that
@@ -113,4 +121,9 @@
 # primitive needed and no source change. Verified with a 0.946.0 release install (aeb v0.348):
 # scripts/aetest.sh, 18 spec files all passing, on cachyos (needs AETHER_CONTRIB pointed at the
 # release's share/aether/contrib when run from a copy). Not re-run on ghostbsd (no sqlite3.h).
-0.946.0
+# Raised 0.946.0 -> 0.949.0 (2026-11-28): a tracking-only bump, no new
+# primitive needed and no source change (no string.to_double or os.which/
+# os.getcwd use here). Verified on 0.949.0: scripts/aetest.sh and ./build.sh
+# on ghostbsd (FreeBSD 15.1 amd64), all suites passing, server built. AETHER_MIN is new in the
+# same commit and holds the real floor, 0.931.0.
+0.949.0

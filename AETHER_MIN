@@ -1,0 +1,7 @@
+# The oldest Aether this repo compiles on: the floor. bootstrap.sh accepts any
+# ae on PATH at or above this. AETHER_PIN is the separate tracking pin it
+# installs and is verified against, and its comments say why 0.931.0:
+# std.string no longer exports aether_string_raw_ptr from 0.931.0 (E0303), and
+# the code stopped using it. Raise only when the code starts needing a newer
+# primitive.
+0.931.0

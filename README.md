@@ -12,8 +12,8 @@ The `fbs-core` backend handles all S3-compatible data operations, disk I/O, and 
 - **HTTP:** `std.http` server; tests use the `std.spec` BDD framework (the stdlib
   absorption of the retired aeocha), plus `std.http.client.httptest` matchers
 - **Build:** `./build.sh` (wraps `aeb cmd/.build.ae`), or `./bootstrap.sh` to
-  install the toolchain first. Toolchain floors are pinned in `AETHER_PIN` /
-  `AEB_PIN`.
+  install the toolchain first. The Aether floor is `AETHER_MIN`, the release it tracks and installs
+  is `AETHER_PIN`, and the aeb floor is `AEB_PIN`.
 
 ## Features
 

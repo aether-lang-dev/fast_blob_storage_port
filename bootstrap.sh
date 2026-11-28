@@ -12,14 +12,16 @@
 #
 # Idempotent: a no-op for the toolchain when `ae`/`aeb` are already good.
 #
-# The floors come from the AETHER_PIN / AEB_PIN files next to this script, so
-# the pin lives in ONE place and this script never drifts from it.
+# The versions come from the AETHER_MIN / AETHER_PIN / AEB_PIN files next to
+# this script, so they live in ONE place and this script never drifts from
+# them. AETHER_MIN is the ae floor, AETHER_PIN the tracking release installed
+# when no ae at or above the floor is on PATH, and AEB_PIN the aeb floor.
 #
 # Env overrides:
 #   PREFIX        install prefix                 (default: $HOME/.local; no sudo)
 #   AETHER_REF    ae tag/branch/SHA to install   (default: the AETHER_PIN tag)
 #   AEB_REF       aeb tag/branch/SHA to install  (default: the AEB_PIN tag)
-#   MIN_AE        minimum acceptable ae version  (default: read from AETHER_PIN)
+#   MIN_AE        minimum acceptable ae version  (default: read from AETHER_MIN)
 # Extra args pass through to scripts/aetest.sh (e.g. ./bootstrap.sh one_test.ae).
 set -euo pipefail
 
@@ -39,7 +41,7 @@ read_pin() { grep -vE '^\s*(#|$)' "$1" | head -n1 | tr -d '[:space:]'; }
 PIN_AE="$(read_pin "$HERE/AETHER_PIN")"
 PIN_AEB="$(read_pin "$HERE/AEB_PIN")"
 # the pin file reads 0.348.0; the release tag is v0.348
-MIN_AE="${MIN_AE:-$PIN_AE}"
+MIN_AE="${MIN_AE:-$(read_pin "$HERE/AETHER_MIN")}"
 
 # fetch_run URL : download an installer to a temp file and run it under sh,
 # inheriting the (exported) env the caller set. Downloads first, then runs the
@@ -62,7 +64,7 @@ else
     AETHER_REF="${AETHER_REF:-v$PIN_AE}" fetch_run "$AETHER_GET_URL" || die "ae install failed (get.sh)."
     command -v ae >/dev/null 2>&1 || die "ae installed but not on PATH — ensure $PREFIX/bin is on PATH."
     have="$(ae_version || true)"
-    version_ge "$have" "$MIN_AE" || die "ae $have is older than the AETHER_PIN floor $MIN_AE."
+    version_ge "$have" "$MIN_AE" || die "ae $have is older than the AETHER_MIN floor $MIN_AE."
     say "ae $have ready"
 fi
 
